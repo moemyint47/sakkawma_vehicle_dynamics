@@ -119,3 +119,7 @@ tests/                   physics identities, limiting cases, API
 3. Bell-crank FEA / topology optimisation export.
 4. Closed-loop steering input with tyre relaxation.
 5. 3D kinematics.
+
+## License
+
+[MIT](LICENSE) © 2026 moemyint47. The bundled third-party libraries (Plotly.js, KaTeX, gridstack.js) are also MIT-licensed. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
