@@ -106,6 +106,7 @@ class VehicleIn(BaseModel):
     wheelbase_mm: float = Field(1550.0, gt=0)
     h_cg_mm: float = Field(290.0, gt=0, description="Total CG height")
     roll_inertia_kgm2: float = Field(15.0, gt=0, description="Sprung-mass roll inertia about its own CG")
+    yaw_inertia_kgm2: float = Field(100.0, gt=0, description="Total yaw inertia about the CG (incl. driver)")
 
 
 class TireIn(BaseModel):

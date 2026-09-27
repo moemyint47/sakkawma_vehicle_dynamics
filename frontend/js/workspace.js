@@ -341,4 +341,5 @@ const WLABEL = {
   "lt-bar": "Steady-state LT split", "view2d": "Front view (animated)", "sweep": "Parameter sweep",
   "kin": "Kinematic curve", "tire": "Tire curve", "params": "Pinned parameters", "targets": "Targets",
   "map2d": "2D map (heatmap + contours)", "optimizer": "Optimiser", "notes": "Notes / instructions",
+  "replay": "Corner replay – animated top view", "replay-plot": "Corner replay – synced plot",
 };

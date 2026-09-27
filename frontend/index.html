@@ -35,6 +35,7 @@
       <button class="tab active" data-tab="results">Results</button>
       <button class="tab" data-tab="transient">Transient</button>
       <button class="tab" data-tab="susp">Springs &amp; dampers</button>
+      <button class="tab" data-tab="replay">Corner replay</button>
       <button class="tab" data-tab="ws">Workspace</button>
       <button class="tab" data-tab="view">Front view</button>
       <button class="tab" data-tab="sweeps">Sweeps &amp; compare</button>
@@ -77,6 +78,27 @@
       <div class="toolbar"><span class="cmpbar"></span>
         <span class="muted small-text">Spring, motion-ratio and damper inputs: sidebar → “… spring &amp; bump stop”, “… damper”.</span></div>
       <div class="fixed-grid" id="su-grid"></div>
+    </section>
+
+    <!-- CORNER REPLAY -->
+    <section class="panel" id="tab-replay">
+      <div class="toolbar rp-bar" id="rp-bar"></div>
+      <div class="toolbar sub">
+        <label><input type="checkbox" id="rp-follow" checked> Follow car</label>
+        <button class="small" id="rp-derive" title="Show the full derivation at the current timestamp">ƒ Derive at this time</button>
+        <span class="muted small-text">Road, speeds and timing: sidebar → “Transient input a_y(t)” (profile = road, presets). Yaw inertia: Vehicle.
+          Wheel circles: area ∝ load · green arrows: tyre F_y · violet arrow: velocity direction (heading + β).</span>
+      </div>
+      <div class="rp-main">
+        <div class="card rp-top"><svg id="rp-svg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg></div>
+        <div class="card rp-side"><h3>Loads &amp; balance at this instant</h3><div id="rp-panel"></div></div>
+      </div>
+      <div class="grid2">
+        <div class="card"><h3>Front suspension at this instant (roll φ(t)) <span class="muted">– seen from behind: car's right side on the right (labelled OUTER for left-hand turns)</span></h3><div class="rp-fv"><svg id="rp-fv" xmlns="http://www.w3.org/2000/svg"></svg></div></div>
+        <div class="card"><h3>Run summary</h3><div id="rp-sum"></div></div>
+      </div>
+      <div class="rp-plots" id="rp-plots"></div>
+      <div class="card"><h3>Derivation at t = <span id="rp-dt">–</span> s</h3><div id="rp-deriv" class="muted small-text">Press “ƒ Derive at this time”.</div></div>
     </section>
 
     <!-- WORKSPACE -->

@@ -8,6 +8,7 @@ import { state, post, setStatus, on, recompute, applyParam, replaceModel, loadLo
 import { buildForm, fillForm } from "./form.js";
 import { mountFixed, renderAllIn, paramOptions as wParamOptions } from "./widgets.js";
 import { Workspace } from "./workspace.js";
+import { replayState as RS, loadReplay, setIdx, TopView, panelHTML, drawPlots, moveCursor, transportHTML, bindTransport } from "./replay.js";
 
 const $ = (s) => document.querySelector(s);
 const vs = { frames: null, framesKey: "", playing: false, viewDirty: true };
@@ -74,6 +75,7 @@ document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () 
   if (b.dataset.tab === "transient") renderAllIn($("#tr-grid"));
   if (b.dataset.tab === "susp") renderAllIn($("#su-grid"));
   if (b.dataset.tab === "ws" && ws) ws.show();
+  if (b.dataset.tab === "replay") loadReplay().then(() => renderReplay(true));
   requestAnimationFrame(() => document.querySelectorAll(`#tab-${b.dataset.tab} .js-plotly-plot`).forEach((p) => Plotly.Plots.resize(p)));
 }));
 
@@ -319,6 +321,61 @@ function mountCompareBars() {
 function syncBars(p, v) {
   document.querySelectorAll(".cmpbar").forEach((el) => { el.querySelector(".cb-p").value = p; el.querySelector(".cb-v").value = v; });
 }
+
+// ------------------------------------------------------------------ corner replay tab
+const rpTop = new TopView($("#rp-svg"));
+const rpFront = new FrontView($("#rp-fv"));
+let rpFrames = null, rpFramesKey = "";
+async function rpFrontFrames() {
+  const key = JSON.stringify([state.model.front, state.model.vehicle.h_cg_mm]);
+  if (key === rpFramesKey) return rpFrames;
+  const vals = Array.from({ length: 161 }, (_, k) => +(-4 + k * 0.05).toFixed(3));
+  rpFrames = await post("/api/pose_frames", { model: state.model, axle: "front", mode: "roll", values: vals });
+  rpFramesKey = key;
+  rpFront.setStatic(rpFrames.frames[80]);
+  return rpFrames;
+}
+function renderReplayTime() {
+  const d = RS.data; if (!d || activeTab() !== "replay") return;
+  const i = RS.idx;
+  rpTop.draw(d, i);
+  $("#rp-panel").innerHTML = panelHTML(d, i);
+  moveCursor($("#rp-plots"), d);
+  if (rpFrames) {
+    const phi = d.phi_deg[i], k = Math.max(0, Math.min(160, Math.round((phi + 4) / 0.05)));
+    const f = rpFrames.frames[k];
+    const g = (key) => (S.byKey[key] ? S.byKey[key].value : null);
+    rpFront.draw(f, { constr: true, dims: true, ghost: true, loads: true,
+      loadsData: { Fz_out: d.Fz.FR[i], Fz_in: d.Fz.FL[i], may: d.Fyf[i] } });
+  }
+}
+async function renderReplay(full) {
+  const d = RS.data; if (!d) return;
+  if (full) {
+    drawPlots($("#rp-plots"), d);
+    const S_ = d.summary;
+    $("#rp-sum").innerHTML = `<table class="vals small-text"><tbody>
+      ${Object.entries(S_.time_in_state_s).map(([k, v]) => `<tr><td>Time in “${k}”</td><td class="n">${v.toFixed(2)} s</td></tr>`).join("")}
+      <tr><td>Peak grip used front / rear</td><td class="n">${(100 * S_.max_util_f).toFixed(0)} % / ${(100 * S_.max_util_r).toFixed(0)} %</td></tr>
+      <tr><td>Most understeer / oversteer Δα</td><td class="n">${S_.max_dalpha.toFixed(2)}° / ${S_.min_dalpha.toFixed(2)}°</td></tr>
+      <tr><td>Lowest wheel load</td><td class="n">${Math.round(S_.min_wheel_load)} N</td></tr></tbody></table>
+      ${(d.warnings || []).length ? `<div class="warn">${d.warnings.join("<br>")}</div>` : ""}`;
+    $("#rp-deriv").innerHTML = d.steps.filter((s) => s.key.startsWith("rp.")).map((s) => stepHTML(s)).join("") || "–";
+    $("#rp-dt").textContent = state.model.maneuver.transient.t_probe_s;
+    try { await rpFrontFrames(); } catch (e) { /* view optional */ }
+  }
+  renderReplayTime();
+}
+$("#rp-bar").innerHTML = transportHTML();
+bindTransport($("#rp-bar"));
+$("#rp-follow").addEventListener("change", (e) => { rpTop.follow = e.target.checked; renderReplayTime(); });
+$("#rp-derive").addEventListener("click", () => {
+  if (!RS.data) return;
+  applyParam("maneuver.transient.t_probe_s", +RS.data.t[RS.idx].toFixed(3));
+});
+on("replay", () => renderReplay(true));
+on("replay-time", () => renderReplayTime());
+on("results", () => { if (activeTab() === "replay") loadReplay(); });
 
 // ------------------------------------------------------------------ boot
 (async function boot() {

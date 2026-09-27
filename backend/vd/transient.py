@@ -85,7 +85,7 @@ def road_profile(m: ModelIn, ds: float = 0.02):
     psi = np.concatenate([[0.0], np.cumsum(0.5 * (kap[1:] + kap[:-1]) * ds)])
     x = np.concatenate([[0.0], np.cumsum(np.cos(psi[:-1]) * ds)])
     y = np.concatenate([[0.0], np.cumsum(np.sin(psi[:-1]) * ds)])
-    plan = {"s": s, "t": t, "x": x, "y": y, "ay_g": ay, "kappa": kap, "v": vel, "edges": edges}
+    plan = {"s": s, "t": t, "x": x, "y": y, "psi": psi, "ay_g": ay, "kappa": kap, "v": vel, "edges": edges}
     return (lambda tq: float(np.interp(tq, t, ay))), plan
 
 

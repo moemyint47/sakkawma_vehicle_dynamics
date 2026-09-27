@@ -34,6 +34,8 @@ ASSUMPTIONS = [
     "estimate J/(2 k_w) (no heave DOF). In the transient, the outer-force share r(a_y) is taken from the steady "
     "coupled solution.",
     "Bell-crank: planar pushrod/rocker/spring linkage in the front view; MR(z) = dx_s/dz from a C2 spline.",
+    "Corner replay: path replay (the car follows the road exactly); lateral + yaw equilibrium give the axle forces; "
+    "longitudinal load transfer without pitch; drive/brake forces not in the lateral/yaw balance; small angles.",
     "Adaptive mode: edits keep the design intent (RC height moves inboard pivots at constant ball joints and "
     "swing-arm length; roll-stiffness target solves the spring rate at constant ARB share; tire radius / camber "
     "move the upright rigidly); the load-transfer RC is locked to the kinematic RC.",

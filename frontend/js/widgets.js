@@ -4,6 +4,7 @@ import { plotTheme } from "./plots.js";
 import { stepHTML, fmtNum } from "./derivations.js";
 import { LABELS, FIELD } from "./spec.js";
 import { FrontView, readouts } from "./view2d.js";
+import { replayState as RS, loadReplay, TopView, drawPlots, moveCursor, transportHTML, bindTransport, STATUS as RP_STATUS } from "./replay.js";
 
 // ------------------------------------------------------------------ catalogues
 export const TR_SERIES = {
@@ -437,6 +438,38 @@ export const WIDGETS = {
       }
       if (inList) html += "</ul>";
       el.innerHTML = `<div class="notes">${html || '<span class="muted">Use ⚙ to write notes.</span>'}</div>`;
+    },
+  },
+
+  "replay": {
+    title: () => "Corner replay – top view", size: [6, 7], fields: [], defaults: { follow: true }, on: ["results"],
+    render(el, c, host) {
+      if (!host.rp) {
+        el.innerHTML = `<div class="rp-widget"><div class="toolbar rp-bar">${transportHTML()}
+          <label><input type="checkbox" class="rpw-follow" ${c.follow ? "checked" : ""}> follow</label></div>
+          <svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg></div>`;
+        host.rp = new TopView(el.querySelector("svg"), { follow: c.follow, compact: true });
+        bindTransport(el.querySelector(".rp-bar"));
+        el.querySelector(".rpw-follow").addEventListener("change", (e) => { c.follow = host.rp.follow = e.target.checked; host.changed(); draw(); });
+        const draw = () => { if (el.isConnected && RS.data) host.rp.draw(RS.data, RS.idx); };
+        on("replay", draw); on("replay-time", draw);
+        host.rpDraw = draw;
+      }
+      loadReplay().then(() => host.rpDraw());
+    },
+  },
+  "replay-plot": {
+    title: (c) => `Replay: ${{ loads: "wheel loads", bal: "balance Δα", util: "grip utilisation", acc: "accelerations", slip: "slip angles, β, δ", yaw: "yaw moment" }[c.plot]}`,
+    size: [6, 4], fields: [{ k: "plot", label: "Plot", type: "select", options: { loads: "Wheel loads", bal: "Balance Δα (under/oversteer)", util: "Grip utilisation", acc: "a_y, a_x", slip: "Slip angles, β, δ", yaw: "Yaw moment" } }],
+    defaults: { plot: "bal" }, on: ["results"],
+    render(el, c, host) {
+      if (!host.rpp) {
+        host.rpp = true;
+        const redraw = () => { if (el.isConnected && RS.data) { drawPlots(el, RS.data, [c.plot]); el.querySelectorAll(".rp-plot").forEach((x) => { x.style.height = "100%"; x.style.border = "none"; }); } };
+        on("replay", redraw); on("replay-time", () => { if (el.isConnected && RS.data) moveCursor(el, RS.data); });
+        host.rppDraw = redraw;
+      }
+      loadReplay().then(() => host.rppDraw());
     },
   },
 

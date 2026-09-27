@@ -11,6 +11,7 @@ Personal tools for learning and developing an FSAE suspension. The backend is Py
   - **Bell-crank geometry:** the pushrod → rocker → spring layout gives MR(z), which sets the progressive rate.
   - **2D maps** and a **target-driven optimiser**.
   - A guided **7-step RC placement workflow**.
+  - **Corner replay:** the car follows the road, and you step through the corner by timestamp. It shows the load on each wheel, understeer/oversteer, grip used, slip angles, sideslip and steer.
 
 > All default numbers are **placeholders**. Replace them with your own car and tire data.
 
@@ -53,6 +54,7 @@ Every derived number is produced through a derivation log (`backend/vd/derivatio
 
 | **Geometric LT, force-based** (`maneuver.geo_model = ic_angles`) | per wheel F_z,link = ±F_y tanθ_IC, with θ the angle of the contact patch → instant centre line at the **rolled pose**. The model gives ΔF_g = [F_y,o tanθ_o + F_y,i tanθ_i]/2 and jacking J = F_y,o tanθ_o − F_y,i tanθ_i. The inner/outer F_y split comes from the tyre model. Roll, loads, tyre split and IC angles are iterated to a fixed point. The effective RC height is h_eff = (t/2)[r tanθ_o + (1−r) tanθ_i]. Ride-height change ≈ J/(2k_w) | OptimumG "Rolling about" |
 | **Bell-crank** | the four-bar gives the LCA angle for wheel travel z. The pushrod end moves with the LCA or the upright. The rocker angle comes from the rigid pushrod length, which gives spring length and travel x_s(z), with MR = dx_s/dz (C2 spline) | — |
+| **Corner replay** (path replay) | from the road: r = vκ, a_y = v²κ, a_x = dv/dt, ṙ. Axle forces from F_yf + F_yr = m a_y and a F_yf − b F_yr = I_z ṙ. Four wheel loads = static ± lateral LT (transient roll model) ∓ m a_x h/(2l). Axle slip angles from TMeasy at those loads. β = b r/v − α_r, δ = α_f − α_r + lκ. Balance Δα = sgn(a_y)(α_f − α_r) and grip used per axle give understeer / neutral / oversteer / sliding against time | track-replay approach |
 | 2D map | any two parameters → any output (heatmap) + a second output (contours) | — |
 | Optimiser | objective = weighted targets (max/min, ≥, ≤, between). Space-filling samples, then bounded Powell. Adaptive rules apply to every evaluation | — |
 
@@ -70,6 +72,7 @@ The tire model needs only the nominal-load data. If you add the double-load data
 - **Transient**: OptimumG-style plots of the load-transfer components (N and % of suspended LT) against time, input a_y, roll, damper velocity, wheel loads and the road plan view. Includes a full derivation breakdown at any time instant, plus run metrics (e.g. damper share at t₀ + 50 ms).
 - **Springs & dampers**: MR, wheel rate, wheel force, roll stiffness and roll moment against roll, and damper force against velocity. One compare bar overlays several values of any parameter (e.g. MR slope 0 / 0.002 / 0.005).
 - **Workspace**: a 12-column snapping grid. You can add any widget (graphs, front view, value tiles with ƒ, sweeps, kinematic and tire curves, **pinned-parameter sliders**, **targets**), and use preset layouts, size presets, lock, tidy and focus mode (hides the sidebar). Workspaces are saved as JSON in `workspaces/`, so they're tracked in git. There are three examples: corner-entry dampers, RC-height study, and slow vs fast corner.
+- **Corner replay**: an animated top view of the car on the road. Wheel-load circles, tyre-force arrows, heading vs velocity (β), the steered front wheels and a status trail show understeer/neutral/oversteer. A timeline has play/pause/speed/step, and every plot is synced to it: wheel loads, balance Δα, grip used, a_y/a_x, slip angles/β/δ and yaw moment. Clicking a plot jumps to that time. The front-view suspension follows roll φ(t), and ƒ gives the full derivation at the current timestamp. It's also available as workspace widgets.
 - **RC placement workflow** (Workspace → `RC placement workflow`), in 7 steps: targets & baseline → place roll centres (map of front × rear RC against limit a_y, with LLTD contours) → RC migration & jacking against a_y → elastic distribution (optimiser) → bell-crank progression → dampers & corner entry → iterate over a_y and corners. Workspaces can have step pages (prev/next, “done” flags), and any workspace can be turned into a step-by-step workflow.
 - **Adaptive / Absolute** switch at the top of the sidebar. ↻ marks fields that act as design targets in adaptive mode.
 - **Baseline**: freeze the current setup, then graphs and tiles show baseline against current.

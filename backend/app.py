@@ -202,6 +202,25 @@ def optimize_ep(req: OptReq):
         raise HTTPException(422, str(e))
 
 
+class ReplayReq(BaseModel):
+    model: ModelIn
+    dt: float = Field(0.01, ge=0.002, le=0.1)
+    band_deg: float = Field(0.1, ge=0, le=5)
+
+
+@app.post("/api/replay")
+def replay_ep(req: ReplayReq):
+    from vd import replay
+    c = Calc()
+    try:
+        r = replay.run(req.model, dt=req.dt, band_deg=req.band_deg, calc=c)
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(422, str(e))
+    r["steps"] = c.to_list()
+    r["warnings"] = c.warnings
+    return JSONResponse(_clean(r))
+
+
 class TransientCmpReq(BaseModel):
     model: ModelIn
     compare_path: Optional[str] = None

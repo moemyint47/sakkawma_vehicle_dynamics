@@ -66,6 +66,7 @@ export const GROUPS = [
     ["vehicle.wheelbase_mm", "Wheelbase", "mm", 5],
     ["vehicle.h_cg_mm", "CG height (total)", "mm", 1],
     ["vehicle.roll_inertia_kgm2", "Sprung roll inertia (about CG)", "kg·m²", 0.5],
+    ["vehicle.yaw_inertia_kgm2", "Yaw inertia (about CG)", "kg·m²", 5],
   ]},
   { title: "Manoeuvre", open: true, fields: [
     ["maneuver.ay_source", "a_y from", "select:input|corner"],

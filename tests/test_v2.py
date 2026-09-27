@@ -189,3 +189,40 @@ def test_sweep2d_shape():
     from vd.sweep import run_sweep2d
     r = run_sweep2d(ModelIn(), "front.h_rc_mm", [20, 50], "rear.h_rc_mm", [30, 60, 90])
     assert len(r["grids"]["lltd_front"]) == 3 and len(r["grids"]["lltd_front"][0]) == 2
+
+
+# ------------------------------------------------------------------ corner replay
+def _arc_model(R=10.0, kmh=36.0):
+    return model(maneuver__transient__profile="road", maneuver__transient__road=[[5, 0, kmh], [120, R, kmh]],
+                 maneuver__transient__road_transition_m=0.0, maneuver__transient__t_end_s=6.0)
+
+
+def test_replay_steady_arc_matches_steady_state():
+    from vd import replay, cornering
+    m = _arc_model()
+    r = replay.run(m, dt=0.01)
+    ay_g = (10.0 ** 2 / 10.0) / m.maneuver.g
+    c = Calc()
+    cornering.compute(m, c, ay_g=ay_g)
+    i = -1  # end of the arc: roll settled, constant yaw rate
+    assert r["ay_g"][i] == pytest.approx(ay_g, rel=1e-9)
+    assert r["alpha_f"][i] == pytest.approx(c.get("f.alpha"), rel=1e-4)
+    assert r["alpha_r"][i] == pytest.approx(c.get("r.alpha"), rel=1e-4)
+    assert r["Fz"]["FR"][i] == pytest.approx(c.get("f.Fz_out"), rel=1e-4)
+    assert r["Fz"]["RL"][i] == pytest.approx(c.get("r.Fz_in"), rel=1e-4)
+
+
+def test_replay_satisfies_lateral_and_yaw_equilibrium():
+    from vd import replay
+    import numpy as np
+    m = model(maneuver__transient__profile="road", maneuver__transient__road=[[8, 0, 26], [14, 4.5, 30], [8, 0, 34]],
+              maneuver__transient__t_end_s=3.9)
+    r = replay.run(m, dt=0.01)
+    V = m.vehicle
+    l = V.wheelbase_mm / 1000; a = l * (1 - V.weight_front); b = l * V.weight_front
+    Fyf, Fyr = np.array(r["Fyf"]), np.array(r["Fyr"])
+    assert np.allclose(Fyf + Fyr, V.mass_kg * np.array(r["ay_g"]) * m.maneuver.g, atol=1e-6)
+    assert np.allclose(a * Fyf - b * Fyr, np.array(r["Mz_yaw"]), atol=1e-6)
+    # vertical equilibrium of the four wheel loads at every instant
+    tot = sum(np.array(v) for v in r["Fz"].values())
+    assert np.allclose(tot, V.mass_kg * m.maneuver.g, atol=1e-6)

@@ -244,3 +244,28 @@ table.targets select { font-size: 12px; }
 .w-settings textarea { font: 12px var(--mono); background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 5px; }
 .o-vars, .o-tgts { display: flex; flex-direction: column; gap: 2px; margin: 6px 0; font-size: 12px; }
 .o-vars label, .o-tgts label { display: flex; gap: 6px; align-items: center; }
+
+/* ---------------- corner replay */
+.rp-bar input[type=range] { flex: 1; min-width: 200px; }
+.rp-bar output { min-width: 80px; font-variant-numeric: tabular-nums; font-weight: 600; }
+.rp-main { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr); gap: 14px; }
+.rp-top { padding: 0; overflow: hidden; }
+.rp-top svg { width: 100%; height: 480px; display: block; }
+.wl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.wl { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+.wl-h { font-size: 11px; color: var(--muted); font-weight: 700; }
+.wl-v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.wl-v small { font-size: 11px; color: var(--muted); }
+.wl-bar { height: 5px; background: var(--surface-2); border-radius: 3px; overflow: hidden; margin: 3px 0; }
+.wl-bar span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.wl-s { font-size: 11px; color: var(--muted); }
+.rp-fv svg { width: 100%; height: 300px; display: block; }
+.rp-plots { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.rp-plot { height: 260px; display: flex; flex-direction: column; margin: 0; }
+.plot-fill-rel { flex: 1; min-height: 0; }
+.rp-widget { display: flex; flex-direction: column; height: 100%; }
+.rp-widget .toolbar { margin: 4px; padding: 4px 8px; gap: 6px; font-size: 12px; }
+.rp-widget svg { flex: 1; min-height: 0; width: 100%; }
+@media (max-width: 900px) { .rp-main { grid-template-columns: 1fr; } }
+.widget .rp-plot { height: 100%; padding: 2px 4px; border: none; }
+.widget .rp-plot h3 { display: none; }
