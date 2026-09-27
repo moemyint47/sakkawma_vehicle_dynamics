@@ -15,7 +15,7 @@ from vd.sweep import with_param  # noqa: E402
 
 
 def model(**over):
-    m = ModelIn()
+    m = ModelIn(param_mode="absolute")  # physics tests: every input independent
     for p, v in over.items():
         m = with_param(m, p.replace("__", "."), v)
     return m
@@ -120,3 +120,72 @@ def test_road_profile_steady_arc_and_timing():
     assert f(3.0) == pytest.approx(10.0 ** 2 / 10.0 / m.maneuver.g)  # on the arc: v^2/R
     assert f(0.2) == pytest.approx(0.0)                                # on the straight
     assert plan["t"][-1] == pytest.approx(45 / 10.0, rel=1e-6)          # 45 m at 10 m/s
+
+
+# ------------------------------------------------------------------ v3: force-based geometric LT
+def test_ic_angle_model_equals_rc_model_at_zero_roll():
+    from vd import geo_coupling as gc
+    m = ModelIn()
+    for ax in (m.front, m.rear):
+        to, ti, _, _ = gc.ic_tangents(ax, 0.0)
+        assert to == pytest.approx(ti, rel=1e-9)
+        assert to * ax.track_mm / 2 == pytest.approx(gc.static_rc(ax) * 1000, rel=1e-6)
+
+
+def test_ic_angle_transient_settles_to_coupled_steady_state():
+    from vd import cornering
+    m = model(maneuver__geo_model="ic_angles", maneuver__transient__t_end_s=4.0)
+    tr = transient.simulate(m)
+    c = Calc()
+    cornering.compute(m, c)
+    assert tr["phi_deg"][-1] == pytest.approx(c.get("phi_deg"), rel=1e-4)
+    for t in "fr":
+        assert tr["axles"][t]["total"][-1] == pytest.approx(c.get(f"{t}.dFz"), rel=1e-4)
+        assert tr["axles"][t]["jack"][-1] == pytest.approx(c.get(f"geo.{t}.J"), rel=1e-3)
+
+
+def test_jacking_sign_follows_rc_height():
+    from vd import geo_coupling as gc
+    up = gc.solve(model(maneuver__geo_model="ic_angles"), 1.2)
+    assert up["axles"]["f"]["J"] > 0  # RC above ground -> body jacked up
+    n, _, _ = adapt.apply(ModelIn(), "front.h_rc_mm", -40.0)
+    dn = gc.solve(with_param(n, "maneuver.geo_model", "ic_angles"), 1.2)
+    assert dn["axles"]["f"]["J"] < 0  # RC below ground -> pushed down
+
+
+# ------------------------------------------------------------------ v3: bell-crank, maps, optimiser
+def test_bellcrank_mr_is_derivative_of_spring_travel():
+    from vd.bellcrank import BellCrank
+    m = ModelIn()
+    b = BellCrank(m.front.hardpoints, m.front.spring.bellcrank, m.front.track_mm)
+    s = susp(m)
+    e = 0.05
+    for z in (-20.0, 0.0, 15.0):
+        num = (b.state(z + e)["xs"] - b.state(z - e)["xs"]) / (2 * e)
+        assert s.mr.mr(z) == pytest.approx(num, rel=2e-3)
+    assert s.wheel_rate(5.0) == pytest.approx((s.spring_wheel(5.0001) - s.spring_wheel(4.9999)) / 0.0002, rel=1e-5)
+
+
+def test_bellcrank_pushrod_length_is_constant():
+    from vd.bellcrank import BellCrank
+    import numpy as np
+    m = ModelIn()
+    b = BellCrank(m.front.hardpoints, m.front.spring.bellcrank, m.front.track_mm)
+    for z in (-30.0, 0.0, 30.0):
+        st = b.state(z)
+        assert float(np.linalg.norm(st["A"] - st["P"])) == pytest.approx(b.Lpr, abs=1e-8)
+
+
+def test_optimizer_improves_objective_and_respects_bounds():
+    from vd import optimize
+    o = optimize.run(ModelIn(), [{"path": "rear.roll_stiffness_Nm_deg", "min": 200.0, "max": 600.0}],
+                     [{"key": "lltd_front", "op": "between", "a": 0.50, "b": 0.52}], max_evals=25)
+    assert o["best"]["J"] <= o["initial"]["J"]
+    assert 200.0 <= o["best"]["x"][0] <= 600.0
+    assert 0.50 - 1e-3 <= o["best"]["values"]["lltd_front"] <= 0.52 + 1e-3
+
+
+def test_sweep2d_shape():
+    from vd.sweep import run_sweep2d
+    r = run_sweep2d(ModelIn(), "front.h_rc_mm", [20, 50], "rear.h_rc_mm", [30, 60, 90])
+    assert len(r["grids"]["lltd_front"]) == 3 and len(r["grids"]["lltd_front"][0]) == 2

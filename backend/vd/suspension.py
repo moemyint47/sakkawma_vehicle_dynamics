@@ -26,10 +26,42 @@ from scipy.interpolate import PchipInterpolator
 from .schemas import AxleIn, DamperIn, SpringIn
 
 
+class _FastCubic:
+    """Scalar evaluation of a scipy CubicSpline (or its 1st/2nd derivative) without call overhead."""
+
+    def __init__(self, cs, nu=0):
+        from bisect import bisect_right
+        self._b = bisect_right
+        self.x = [float(v) for v in cs.x]
+        self.c = [[float(v) for v in col] for col in cs.c.T]  # per interval: c3, c2, c1, c0 (highest first)
+        self.nu = nu
+
+    def __call__(self, z):
+        x = self.x
+        i = min(max(self._b(x, z) - 1, 0), len(x) - 2)
+        a, b, c, d = self.c[i]
+        t = z - x[i]
+        if self.nu == 0:
+            return ((a * t + b) * t + c) * t + d
+        if self.nu == 1:
+            return (3 * a * t + 2 * b) * t + c
+        return 6 * a * t + 2 * b
+
+
 class MRCurve:
-    def __init__(self, sp: SpringIn):
+    def __init__(self, sp: SpringIn, ax: AxleIn | None = None):
         self.mode = sp.mr_mode
-        if self.mode == "table" and sp.mr_table and len(sp.mr_table) >= 2:
+        if self.mode == "bellcrank" and ax is not None:
+            from .bellcrank import fast_for
+            cs, d1, d2, zlo, zhi = fast_for(ax)
+            x0 = float(cs(0.0))
+            self.zlim = (zlo, zhi)
+            clip = lambda zz: min(max(zz, zlo), zhi)
+            self._p = lambda zz: float(d1(clip(zz)))
+            self._dp = lambda zz: float(d2(zz)) if zlo <= zz <= zhi else 0.0
+            # linear extrapolation of spring travel outside the sampled linkage range
+            self._x = lambda zz: (float(cs(clip(zz))) + float(d1(clip(zz))) * (zz - clip(zz))) - x0
+        elif self.mode == "table" and sp.mr_table and len(sp.mr_table) >= 2:
             pts = sorted((float(a), float(b)) for a, b in sp.mr_table)
             z = np.array([p[0] for p in pts])
             m = np.array([p[1] for p in pts])
@@ -97,7 +129,7 @@ class AxleSuspension:
         self.direct = ax.roll_stiffness_source == "direct"
         self.K_direct = ax.roll_stiffness_Nm_deg * 180 / math.pi  # N·m/rad
         self.W = m_s_axle * g / 2.0  # static sprung corner load
-        self.mr = MRCurve(ax.spring)
+        self.mr = MRCurve(ax.spring, ax)
         self.ks = ax.spring.rate_N_mm
         self.mr0 = self.mr.mr(0.0)
         if self.mr0 <= 0:

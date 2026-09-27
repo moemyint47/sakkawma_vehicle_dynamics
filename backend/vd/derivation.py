@@ -11,8 +11,30 @@ from dataclasses import dataclass, field, asdict
 from typing import Any
 
 
+import threading
+
+_TL = threading.local()
+
+
+class quiet:
+    """Context manager: skip number formatting while computing without a derivation log."""
+
+    def __init__(self, on: bool = True):
+        self.on = on
+
+    def __enter__(self):
+        self.prev = getattr(_TL, "quiet", False)
+        _TL.quiet = self.on
+        return self
+
+    def __exit__(self, *a):
+        _TL.quiet = self.prev
+
+
 def fmt(x: float, sig: int = 6) -> str:
     """Format a number for display inside LaTeX substitutions."""
+    if getattr(_TL, "quiet", False):
+        return ""
     if x is None:
         return r"\text{n/a}"
     try:

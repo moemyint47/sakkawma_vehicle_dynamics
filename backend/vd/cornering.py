@@ -27,7 +27,7 @@ def axle_capacity(Fz_o, Fz_i, t):
     """Maximum of F_y,o(alpha)+F_y,i(alpha) and the slip angle where it occurs."""
     po, pi_ = tiremod.params_at(Fz_o, t), tiremod.params_at(Fz_i, t)
     G = lambda a: tiremod.force_from_slip(math.tan(a), po) + tiremod.force_from_slip(math.tan(a), pi_)
-    n = 90
+    n = 36
     best_a, best = 0.0, 0.0
     for k in range(1, n + 1):
         a = ALPHA_SCAN_MAX * k / n
@@ -38,7 +38,7 @@ def axle_capacity(Fz_o, Fz_i, t):
     lo, hi = max(best_a - ALPHA_SCAN_MAX / n, 0.0), min(best_a + ALPHA_SCAN_MAX / n, ALPHA_SCAN_MAX)
     gr = (math.sqrt(5) - 1) / 2
     c, d = hi - gr * (hi - lo), lo + gr * (hi - lo)
-    for _ in range(40):
+    for _ in range(34):
         if G(c) > G(d):
             hi = d
         else:
@@ -61,12 +61,20 @@ def solve_axle(F_req, Fz_o, Fz_i, t):
 def compute(m: ModelIn, calc: Calc | None = None, ay_g: float | None = None,
             with_gradient: bool = True) -> dict:
     calc = calc or NullCalc()
-    lt = load_transfer.compute(m, calc, ay_g=ay_g)
+    geo = None
+    if m.maneuver.geo_model == "ic_angles":
+        from . import geo_coupling
+        geo = geo_coupling.solve(m, ay_g)
+        lt = load_transfer.compute(m, calc, ay_g=ay_g, hrc_override=geo["h"])
+        if not isinstance(calc, NullCalc):
+            geo_coupling.record(m, geo, calc)
+    else:
+        lt = load_transfer.compute(m, calc, ay_g=ay_g)
     t = m.tire
     ay = lt["ay"]
     if not isinstance(calc, NullCalc):
         tiremod.record_tire_inputs(t, calc)
-    out = {"lt": lt, "axles": {}}
+    out = {"lt": lt, "axles": {}, "geo": geo}
     for tag, name in (("f", "Front"), ("r", "Rear")):
         S = f"6. {name} axle tires & slip angle"
         ax = lt["axles"][tag]
@@ -142,9 +150,19 @@ def paren_(x):
     return f"({s})" if x < 0 else s
 
 
+_WARM = {}
+
+
 def _feasible(m: ModelIn, ay_g: float):
     """Return (ok, reason) - ok if both axles can generate required force without wheel lift."""
-    lt = load_transfer.compute(m, NullCalc(), ay_g=ay_g)
+    if m.maneuver.geo_model == "ic_angles":
+        from . import geo_coupling
+        key = id(m)
+        info = geo_coupling.solve(m, ay_g, exact=False, tol_mm=0.05, h0=_WARM.get(key))
+        _WARM.clear(); _WARM[key] = info["h"]  # warm start for the next bisection step
+        lt = info["lt"]
+    else:
+        lt = load_transfer.compute(m, NullCalc(), ay_g=ay_g)
     if math.isnan(lt["phi"]):
         return False, "roll instability"
     for tag, name in (("f", "front"), ("r", "rear")):
@@ -166,7 +184,7 @@ def limit_ay(m: ModelIn, calc: Calc | None = None, ay_hi: float = 4.0) -> dict:
     ok, reason = _feasible(m, hi)
     if ok:
         return {"ay_max_g": hi, "reason": f"no limit found below {ay_hi} g"}
-    for _ in range(45):
+    for _ in range(32):
         mid = 0.5 * (lo + hi)
         ok, r = _feasible(m, mid)
         if ok:

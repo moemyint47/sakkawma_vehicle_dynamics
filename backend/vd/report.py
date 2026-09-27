@@ -29,6 +29,11 @@ ASSUMPTIONS = [
     "wheel travel +-(t/2) phi; geometric and unsprung load transfer instantaneous; net vertical force from "
     "asymmetric elements (progressive springs, bump/rebound damping) is reacted (no jacking yet).",
     "Road profile: a_y = v^2 kappa(s) with linear curvature (clothoid) transitions between segments.",
+    "Geometric LT model 'ic_angles': link forces along contact patch -> instant centre lines at the rolled pose, "
+    "tyre force split from TMeasy, fixed-point iteration with roll; jacking reported, ride height as a linear "
+    "estimate J/(2 k_w) (no heave DOF). In the transient, the outer-force share r(a_y) is taken from the steady "
+    "coupled solution.",
+    "Bell-crank: planar pushrod/rocker/spring linkage in the front view; MR(z) = dx_s/dz from a C2 spline.",
     "Adaptive mode: edits keep the design intent (RC height moves inboard pivots at constant ball joints and "
     "swing-arm length; roll-stiffness target solves the spring rate at constant ARB share; tire radius / camber "
     "move the upright rigidly); the load-transfer RC is locked to the kinematic RC.",

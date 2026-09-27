@@ -344,6 +344,7 @@ function syncBars(p, v) {
   mountFixed($("#su-grid"), [
     ["susp-curve", { kind: "mr" }, 4], ["susp-curve", { kind: "kw" }, 4], ["susp-curve", { kind: "fw" }, 4],
     ["susp-curve", { kind: "roll_k" }, 4], ["susp-curve", { kind: "roll_m" }, 4], ["susp-curve", { kind: "damper" }, 4],
+    ["view2d", { axle: "front", mode: "heave", value: 20 }, 6], ["view2d", { axle: "rear", mode: "heave", value: 20 }, 6],
   ]);
   ws = new Workspace($("#ws-root"));
 })();

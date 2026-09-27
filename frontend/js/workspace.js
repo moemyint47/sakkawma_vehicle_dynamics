@@ -64,6 +64,7 @@ export class Workspace {
         <button class="small" id="ws-lock" title="Freeze the layout">🔓 Unlocked</button>
         <button class="small" id="ws-focus" title="Hide the full parameter sidebar">Focus mode</button>
       </div>
+      <div class="ws-steps" id="ws-steps"></div>
       <div class="grid-stack" id="ws-grid"></div>`;
     this.grid = GridStack.init({ column: 12, cellHeight: 64, margin: 6, float: false, handle: ".w-head",
       resizable: { handles: "se, e, s, w" }, animate: true }, "#ws-grid");
@@ -78,7 +79,7 @@ export class Workspace {
       $("#ws-focus").classList.toggle("on", f);
       requestAnimationFrame(() => this.resizeAll());
     });
-    $("#ws-new").addEventListener("click", () => { this.id = null; this.load(TEMPLATE()); $("#ws-sel").value = ""; });
+    $("#ws-new").addEventListener("click", () => { this.id = null; this.load({ ...TEMPLATE(), pages: undefined }); $("#ws-sel").value = ""; });
     $("#ws-save").addEventListener("click", () => this.save(false));
     $("#ws-saveas").addEventListener("click", () => this.save(true));
     $("#ws-del").addEventListener("click", () => this.remove());
@@ -134,21 +135,80 @@ export class Workspace {
   }
   resizeAll() { for (const h of this.hosts.values()) h.resize(); }
   syncLayout() {
-    this.doc.layout = this.grid.getGridItems().map((el) => {
+    if (this.loading) return;
+    const lay = this.grid.getGridItems().map((el) => {
       const n = el.gridstackNode, h = this.hosts.get(n.id);
       return h ? { id: n.id, type: h.type, x: n.x, y: n.y, w: n.w, h: n.h, cfg: h.cfg } : null;
     }).filter(Boolean);
+    if (this.doc.pages && this.doc.pages.length) this.doc.pages[this.page].layout = lay;
+    else this.doc.layout = lay;
+  }
+
+  // ---------------- steps (multi-page workflow)
+  renderSteps() {
+    const el = document.getElementById("ws-steps");
+    const P = this.doc.pages;
+    if (!P || !P.length) {
+      el.innerHTML = `<button class="small ghost" id="st-conv" title="Turn this workspace into a step-by-step workflow">+ make it a step-by-step workflow</button>`;
+      el.querySelector("#st-conv").addEventListener("click", () => {
+        this.syncLayout();
+        this.doc.pages = [{ title: "Step 1", layout: this.doc.layout, done: false }];
+        this.page = 0; this.renderSteps();
+      });
+      return;
+    }
+    const cur = P[this.page];
+    el.innerHTML = `<div class="steps">${P.map((p, i) => `<button class="step ${i === this.page ? "on" : ""} ${p.done ? "done" : ""}" data-i="${i}">
+        <span class="sn">${p.done ? "✓" : i + 1}</span>${p.title}</button>`).join("")}</div>
+      <div class="step-tools">
+        <button class="small" id="st-prev" ${this.page === 0 ? "disabled" : ""}>◀ Prev</button>
+        <label><input type="checkbox" id="st-done" ${cur.done ? "checked" : ""}> step done</label>
+        <button class="small primary" id="st-next" ${this.page === P.length - 1 ? "disabled" : ""}>Next ▶</button>
+        <span class="sep"></span>
+        <button class="small ghost" id="st-add">+ step</button><button class="small ghost" id="st-ren">Rename</button>
+        <button class="small ghost" id="st-del">Delete step</button></div>`;
+    el.querySelectorAll(".step").forEach((b) => b.addEventListener("click", () => this.goPage(Number(b.dataset.i))));
+    el.querySelector("#st-prev").addEventListener("click", () => this.goPage(this.page - 1));
+    el.querySelector("#st-next").addEventListener("click", () => this.goPage(this.page + 1));
+    el.querySelector("#st-done").addEventListener("change", (e) => { cur.done = e.target.checked; this.renderSteps(); });
+    el.querySelector("#st-add").addEventListener("click", () => {
+      const t = prompt("Step title", `Step ${P.length + 1}`); if (!t) return;
+      this.syncLayout(); P.splice(this.page + 1, 0, { title: t, layout: [], done: false }); this.goPage(this.page + 1);
+    });
+    el.querySelector("#st-ren").addEventListener("click", () => { const t = prompt("Step title", cur.title); if (t) { cur.title = t; this.renderSteps(); } });
+    el.querySelector("#st-del").addEventListener("click", () => {
+      if (P.length <= 1 || !confirm(`Delete step “${cur.title}” and its widgets?`)) return;
+      P.splice(this.page, 1); this.page = Math.max(0, this.page - 1); this.showLayout(P[this.page].layout); this.renderSteps();
+    });
+  }
+  goPage(i) {
+    const P = this.doc.pages;
+    if (!P || i < 0 || i >= P.length) return;
+    this.syncLayout();
+    this.page = i; this.doc.page = i;
+    this.showLayout(P[i].layout);
+    this.renderSteps();
+  }
+  showLayout(layout) {
+    this.loading = true;
+    this.grid.removeAll();
+    this.hosts.clear();
+    this.grid.batchUpdate();
+    for (const it of layout || []) if (WIDGETS[it.type]) this.addWidget(it.type, it, it.cfg, it.id);
+    this.grid.batchUpdate(false);
+    this.loading = false;
+    this.syncLayout();
+    requestAnimationFrame(() => this.resizeAll());
   }
   show() { requestAnimationFrame(() => { for (const h of this.hosts.values()) if (h.dirty || !h.body.firstChild) h.render(); this.resizeAll(); }); }
 
   // ---------------- documents
   load(doc) {
-    this.grid.removeAll();
-    this.hosts.clear();
     this.doc = { ...TEMPLATE(), ...doc };
-    this.grid.batchUpdate();
-    for (const it of this.doc.layout) if (WIDGETS[it.type]) this.addWidget(it.type, it, it.cfg, it.id);
-    this.grid.batchUpdate(false);
+    if (doc.pages && !doc.layout) this.doc.layout = [];
+    this.page = this.doc.pages && this.doc.pages.length ? Math.min(this.doc.page || 0, this.doc.pages.length - 1) : 0;
+    this.showLayout(this.doc.pages && this.doc.pages.length ? this.doc.pages[this.page].layout : this.doc.layout);
+    this.renderSteps();
     if (this.doc.model) replaceModel(this.doc.model);
     if (this.doc.compare && this.doc.compare.path) setCompare(this.doc.compare.path, this.doc.compare.values);
     this.setLock(false);
@@ -280,4 +340,5 @@ const WLABEL = {
   "susp-curve": "Spring / damper / roll-stiffness curve", "road": "Road plan view", "value": "Value tile",
   "lt-bar": "Steady-state LT split", "view2d": "Front view (animated)", "sweep": "Parameter sweep",
   "kin": "Kinematic curve", "tire": "Tire curve", "params": "Pinned parameters", "targets": "Targets",
+  "map2d": "2D map (heatmap + contours)", "optimizer": "Optimiser", "notes": "Notes / instructions",
 };

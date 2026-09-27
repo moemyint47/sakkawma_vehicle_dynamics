@@ -41,6 +41,16 @@ class Hardpoints(BaseModel):
     static_camber_deg: float = Field(-1.5, description="Static camber, + = top of wheel outward")
 
 
+class BellCrankIn(BaseModel):
+    """Front-view pushrod / rocker / spring layout (one side, mm, same axes as the hardpoints)."""
+    pushrod_on: Literal["lca", "upright"] = Field("lca", description="Pushrod outboard end fixed to the LCA or the upright")
+    pushrod_out: Point2 = Field(default_factory=lambda: Point2(y=535, z=140), description="Pushrod outboard end")
+    rocker_pivot: Point2 = Field(default_factory=lambda: Point2(y=215, z=365), description="Rocker pivot (chassis)")
+    rocker_pushrod: Point2 = Field(default_factory=lambda: Point2(y=221, z=431), description="Pushrod joint on rocker")
+    rocker_spring: Point2 = Field(default_factory=lambda: Point2(y=175, z=417.5), description="Spring joint on rocker")
+    spring_mount: Point2 = Field(default_factory=lambda: Point2(y=-9, z=352), description="Spring chassis mount")
+
+
 class SpringIn(BaseModel):
     """Coil spring acting through a (progressive) motion ratio.
 
@@ -50,11 +60,12 @@ class SpringIn(BaseModel):
     The spring preload is solved so the corner is in equilibrium at z = 0.
     """
     rate_N_mm: float = Field(35.0, gt=0, description="Spring rate (at the spring)")
-    mr_mode: Literal["poly", "table"] = "poly"
+    mr_mode: Literal["poly", "table", "bellcrank"] = "bellcrank"
     mr_c0: float = Field(0.75, gt=0, description="MR at static ride height")
     mr_c1: float = Field(0.002, description="MR slope [1/mm] (+ = progressive)")
     mr_c2: float = Field(0.0, description="MR curvature [1/mm^2]")
     mr_table: Optional[list[list[float]]] = Field(None, description="[[wheel travel mm, MR], ...]")
+    bellcrank: BellCrankIn = Field(default_factory=BellCrankIn, description="Rocker geometry (mr_mode = bellcrank)")
     bump_gap_mm: Optional[float] = Field(25.0, description="Wheel travel to bump-stop contact (None = off)")
     bump_rate_N_mm: float = Field(150.0, ge=0, description="Bump-stop rate at the wheel")
 
@@ -148,12 +159,15 @@ class ManeuverIn(BaseModel):
     speed_kmh: float = Field(37.3, gt=0, description="Speed on the corner (ay_source = corner)")
     g: float = Field(9.81, gt=0)
     roll_gravity_term: bool = Field(True, description="Include m_s g h1 phi (lateral CG shift) in roll")
+    geo_model: Literal["rc_height", "ic_angles"] = Field(
+        "rc_height", description="Geometric LT: classic RC-height formula, or force-based IC angles at the rolled "
+                                 "pose with tyre force split (RC migration + jacking)")
     transient: TransientIn = Field(default_factory=TransientIn)
 
 
 def _default_front() -> AxleIn:
     return AxleIn(
-        track_mm=1220, h_rc_mm=35.1416, roll_stiffness_Nm_deg=398.6882, arb_share=0.312755,
+        track_mm=1220, h_rc_mm=35.1416, roll_stiffness_Nm_deg=403.1185, arb_share=0.309318,
         unsprung_mass_kg=12, h_unsprung_mm=228,
         hardpoints=Hardpoints(
             lca_in=Point2(y=210, z=120.5), lca_out=Point2(y=580, z=125),
@@ -164,9 +178,9 @@ def _default_front() -> AxleIn:
 
 def _default_rear() -> AxleIn:
     return AxleIn(
-        track_mm=1180, h_rc_mm=54.9676, roll_stiffness_Nm_deg=340.2725,
+        track_mm=1180, h_rc_mm=54.9676, roll_stiffness_Nm_deg=377.3118,
         unsprung_mass_kg=13, h_unsprung_mm=228, arb_rate_N_mm=5.6,
-        spring=SpringIn(rate_N_mm=40.0, mr_c0=0.72, mr_c1=0.002), arb_share=0.199974,
+        spring=SpringIn(rate_N_mm=40.0, mr_c0=0.72, mr_c1=0.002), arb_share=0.180343,
         damper=DamperIn(mr_const=0.72),
         hardpoints=Hardpoints(
             lca_in=Point2(y=220, z=130.2), lca_out=Point2(y=560, z=125),

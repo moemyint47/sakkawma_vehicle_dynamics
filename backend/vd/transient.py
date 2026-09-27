@@ -102,9 +102,50 @@ def _setup(m: ModelIn):
     hrf, hrr = F.h_rc_mm / 1000, R.h_rc_mm / 1000
     h1 = hs - (hrf + (hrr - hrf) * a_s / l)
     susp = {"f": AxleSuspension(F, msf, g), "r": AxleSuspension(R, msr, g)}
-    return dict(g=g, ms=ms, msax={"f": msf, "r": msr}, h1=h1, hs=hs, susp=susp,
+    msax = {"f": msf, "r": msr}
+    tr = {"f": F.track_mm / 1000, "r": R.track_mm / 1000}
+    axes = {"f": F, "r": R}
+    if M.geo_model == "ic_angles":
+        from . import geo_coupling as gc
+        hrf, hrr = gc.static_rc(F), gc.static_rc(R)
+        h1 = hs - (hrf + (hrr - hrf) * a_s / l)
+        # outer-force share r(a_y) from the steady coupled solution at a few a_y levels
+        from .schemas import effective_ay_g
+        amax = max(0.1, abs(effective_ay_g(M)), 0.1)
+        if M.transient.profile in ("road", "csv"):
+            try:
+                amax = max(amax, float(np.max(np.abs([ay_profile(m)(t) for t in np.linspace(0, M.transient.t_end_s, 400)]))))
+            except Exception:
+                pass
+        nodes = np.linspace(0.02, amax, 9)
+        rt = {"f": [], "r": []}
+        for a in nodes:
+            info = gc.solve(m, float(a), exact=False, tol_mm=1e-3)
+            for k in "fr":
+                rt[k].append(info["axles"][k]["r"])
+
+        def geo(tag, ay, phi):
+            if abs(ay) < 1e-12:
+                return 0.0, 0.0
+            sg = 1.0 if ay > 0 else -1.0
+            r = float(np.interp(abs(ay) / g, nodes, rt[tag]))
+            to, ti = gc.tan_fast(axes[tag], sg * phi / DEG)
+            Fys = msax[tag] * abs(ay)
+            return sg * Fys * (r * to + (1 - r) * ti) / 2, Fys * (r * to - (1 - r) * ti)
+    else:
+        def geo(tag, ay, phi):
+            return msax[tag] * ay * (hrf if tag == "f" else hrr) / tr[tag], 0.0
+    return dict(g=g, ms=ms, msax=msax, h1=h1, hs=hs, susp=susp, geo=geo, tr=tr,
                 hrc={"f": hrf, "r": hrr}, mu={"f": F.unsprung_mass_kg, "r": R.unsprung_mass_kg},
                 hu={"f": huf, "r": hur}, I=V.roll_inertia_kgm2 + ms * h1 ** 2)
+
+
+def _applied_moment(P, ay, phi, grav):
+    """m_s a_y h_s - sum(geometric moments) [+ m_s g h1_eff phi]  (= m_s a_y h1 for the classic RC model)."""
+    ms, g, hs = P["ms"], P["g"], P["hs"]
+    Mg = sum(P["geo"](k, ay, phi)[0] * P["tr"][k] for k in "fr")
+    h1e = hs - Mg / (ms * ay) if abs(ay) > 1e-9 else P["h1"]
+    return ms * ay * hs - Mg + (ms * g * h1e * phi if grav else 0.0)
 
 
 def _rhs_factory(P, ayf, grav):
@@ -113,7 +154,7 @@ def _rhs_factory(P, ayf, grav):
     def rhs(t, y):
         phi, w = y
         ay = ayf(t) * g
-        M = ms * ay * h1 + (ms * g * h1 * phi if grav else 0.0)
+        M = _applied_moment(P, ay, phi, grav)
         for s in susp.values():
             c = s.components(phi, w)
             M -= s.t * (c["spring"] + c["bump"] + c["arb"] + c["damper"])
@@ -142,7 +183,7 @@ def simulate(m: ModelIn, calc: Calc | None = None, n_out: int | None = None) -> 
            "phidot_deg_s": (sol.y[1] / DEG).tolist(), "axles": {}}
     for tag in ("f", "r"):
         s = P["susp"][tag]
-        cols = {k: [] for k in ("geo", "unsprung", "spring", "bump", "arb", "damper", "elastic", "suspended",
+        cols = {k: [] for k in ("geo", "jack", "dz_jack", "unsprung", "spring", "bump", "arb", "damper", "elastic", "suspended",
                                 "total", "Fz_out", "Fz_in", "v_d_out", "v_d_in", "z_out",
                                 "pct_geo", "pct_spring", "pct_arb", "pct_damper", "pct_bump")}
         Fz0 = (P["msax"][tag] + 2 * P["mu"][tag]) * g / 2
@@ -150,7 +191,10 @@ def simulate(m: ModelIn, calc: Calc | None = None, n_out: int | None = None) -> 
             ay = ayf(t) * g
             phi, w = sol.y[0, i], sol.y[1, i]
             c = s.components(phi, w)
-            geo = P["msax"][tag] * ay * P["hrc"][tag] / s.t
+            geo, jack = P["geo"](tag, ay, phi)
+            kw = s.wheel_rate(0.0) if not s.direct else s.K_direct / (1000 * s.t ** 2 / 2)
+            cols["jack"].append(jack)
+            cols["dz_jack"].append(jack / (2 * kw) if kw > 0 else None)
             un = 2 * P["mu"][tag] * ay * P["hu"][tag] / s.t
             el = c["spring"] + c["bump"] + c["arb"] + c["damper"]
             sus = geo + el
@@ -245,7 +289,12 @@ def probe(m, P, ayf, sol, calc):
              rf"\phi={fmt(phi)}\,rad", phi / DEG, "deg", S)
     calc.add("p.phidot", r"\dot\phi(t)", "Roll rate (integrated)", r"\int\ddot\phi\,dt\ \ \text{(RK45)}",
              rf"\dot\phi={fmt(w)}\,rad/s", w / DEG, "deg/s", S)
-    Mtot = ms * ay * h1 + (ms * g * h1 * phi if m.maneuver.roll_gravity_term else 0.0)
+    Mtot = _applied_moment(P, ay, phi, m.maneuver.roll_gravity_term)
+    coupled = m.maneuver.geo_model == "ic_angles"
+    calc.add("p.Mapp", r"M_{app}(t)", "Applied roll moment on the springs/dampers",
+             r"m_s a_y h_s-\sum_i t_i\,\Delta F_{g,i}" + (r"+m_s g h_{1,eff}\phi" if m.maneuver.roll_gravity_term else ""),
+             rf"{fmt(ms)}\cdot{fmt(ay)}\cdot{fmt(P['hs'])}-\sum t_i\Delta F_{{g,i}}" + (r"+\dots" if m.maneuver.roll_gravity_term else ""),
+             Mtot, "N·m", S, note="classic RC model: equals m_s a_y h_1 (+ m_s g h_1 phi)")
     parts = []
     for tag, name in (("f", "Front"), ("r", "Rear")):
         s = P["susp"][tag]
@@ -254,9 +303,16 @@ def probe(m, P, ayf, sol, calc):
         calc.add(f"p.{tag}.zo", rf"z_o^{tag},\ \dot z_o^{tag}", f"{name}: outer wheel travel / velocity",
                  r"\frac{t}{2}\phi,\ \frac{t}{2}\dot\phi", rf"\frac{{{fmt(s.t * 1000)}}}{{2}}\cdot{paren(phi)},\ \frac{{{fmt(s.t * 1000)}}}{{2}}\cdot{paren(w)}",
                  zo, "mm", S, note=f"z'_o = {vo:.4f} mm/s")
-        geo = calc.add(f"p.{tag}.geo", rf"\Delta F_g^{tag}", f"{name}: geometric LT", r"\frac{m_{s,ax}\,a_y\,h_{rc}}{t}",
-                       rf"\frac{{{fmt(P['msax'][tag])}\cdot{fmt(ay)}\cdot{paren(P['hrc'][tag])}}}{{{fmt(s.t)}}}",
-                       P["msax"][tag] * ay * P["hrc"][tag] / s.t, "N", S)
+        gv, jv = P["geo"](tag, ay, phi)
+        if coupled:
+            geo = calc.add(f"p.{tag}.geo", rf"\Delta F_g^{tag}", f"{name}: geometric LT (IC angles at \u03c6(t))",
+                           r"\frac{m_{s,ax}a_y\left[r\tan\theta_o(\phi)+(1-r)\tan\theta_i(\phi)\right]}{2}",
+                           rf"\phi={fmt(phi / DEG)}^\circ,\ J={fmt(jv)}\,N", gv, "N", S,
+                           note="r(a_y) from the steady coupled solution; tan(theta) from the rolled kinematics")
+        else:
+            geo = calc.add(f"p.{tag}.geo", rf"\Delta F_g^{tag}", f"{name}: geometric LT", r"\frac{m_{s,ax}\,a_y\,h_{rc}}{t}",
+                           rf"\frac{{{fmt(P['msax'][tag])}\cdot{fmt(ay)}\cdot{paren(P['hrc'][tag])}}}{{{fmt(s.t)}}}",
+                           gv, "N", S)
         if s.direct:
             calc.add(f"p.{tag}.spring", rf"\Delta F_{{spring}}^{tag}", f"{name}: springs+ARB LT (direct K)",
                      r"\frac{K_\phi\phi}{t}", rf"\frac{{{fmt(s.K_direct)}\cdot{paren(phi)}}}{{{fmt(s.t)}}}", c["spring"], "N", S)
@@ -284,7 +340,6 @@ def probe(m, P, ayf, sol, calc):
     Mel = sum(t * e for t, e, _ in parts)
     msum = "+".join(fmt(t) + r"\cdot" + paren(e) for t, e, _ in parts)
     calc.add("p.phiddot", r"\ddot\phi(t)", "Roll acceleration (equation of motion)",
-             r"\frac{m_s a_y h_1" + (r"+m_s g h_1\phi" if m.maneuver.roll_gravity_term else "") +
-             r"-\sum t_i\,\Delta F_{el,i}}{I_{ra}}",
+             r"\frac{M_{app}-\sum t_i\,\Delta F_{el,i}}{I_{ra}}",
              rf"\frac{{{fmt(Mtot)}-\left({msum}\right)}}{{{fmt(I)}}}",
              (Mtot - Mel) / I / DEG, "deg/s²", S)

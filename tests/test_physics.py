@@ -14,7 +14,7 @@ from vd.sweep import with_param  # noqa: E402
 
 
 def model(**over):
-    m = ModelIn()
+    m = ModelIn(param_mode="absolute")  # physics tests: every input independent
     for path, v in over.items():
         m = with_param(m, path.replace("__", "."), v)
     return m
@@ -26,7 +26,7 @@ def test_moment_balance(grav):
     m = model(maneuver__roll_gravity_term=grav)
     r = load_transfer.compute(m, Calc())
     got, exp = r["moment_check"]
-    assert got == pytest.approx(exp, rel=1e-12)
+    assert got == pytest.approx(exp, rel=1e-9)  # exact up to the roll-equilibrium solver tolerance
 
 
 def test_rc_at_cg_is_fully_geometric():

@@ -116,6 +116,10 @@ class ReportReq(BaseModel):
     notes: str = ""
 
 
+def _bc(ax):
+    return ax.spring.bellcrank if ax.spring.mr_mode == "bellcrank" else None
+
+
 # ---------------------------------------------------------------- endpoints
 @app.get("/api/defaults")
 def defaults():
@@ -157,6 +161,45 @@ def adapt_param(req: AdaptReq):
     except (ValueError, TypeError) as e:
         raise HTTPException(422, str(e))
     return JSONResponse(_clean({"model": new.model_dump(), "changes": changes, "steps": c.to_list()}))
+
+
+class Sweep2dReq(BaseModel):
+    model: ModelIn
+    x_path: str
+    x_values: list[float]
+    y_path: str
+    y_values: list[float]
+    include_limit: bool = False
+    include_transient: bool = False
+
+
+@app.post("/api/sweep2d")
+def sweep2d(req: Sweep2dReq):
+    n = len(req.x_values) * len(req.y_values)
+    if n > 625 or (req.include_limit and n > 225) or (req.include_transient and n > 121):
+        raise HTTPException(400, "map too large (max 25x25, 15x15 with limit a_y, 11x11 with transient)")
+    try:
+        res = sweep.run_sweep2d(req.model, req.x_path, req.x_values, req.y_path, req.y_values,
+                                req.include_limit, req.include_transient)
+    except KeyError as e:
+        raise HTTPException(400, f"unknown parameter path {e}")
+    return JSONResponse(_clean(res))
+
+
+class OptReq(BaseModel):
+    model: ModelIn
+    variables: list[dict]
+    targets: list[dict]
+    max_evals: int = Field(60, ge=5, le=400)
+
+
+@app.post("/api/optimize")
+def optimize_ep(req: OptReq):
+    from vd import optimize
+    try:
+        return JSONResponse(_clean(optimize.run(req.model, req.variables, req.targets, req.max_evals)))
+    except (ValueError, KeyError) as e:
+        raise HTTPException(422, str(e))
 
 
 class TransientCmpReq(BaseModel):
@@ -238,7 +281,7 @@ def pose(req: PoseReq):
     ax = getattr(req.model, req.axle)
     s = kinematics2d.solve_pose(ax.hardpoints, ax.hardpoints, ax.track_mm, phi_deg=req.phi_deg,
                                 heave_mm=req.heave_mm, bump_o_mm=req.bump_o_mm, bump_i_mm=req.bump_i_mm,
-                                h_cg_mm=req.model.vehicle.h_cg_mm)
+                                h_cg_mm=req.model.vehicle.h_cg_mm, bc=_bc(ax))
     return JSONResponse(_clean(s))
 
 
@@ -251,7 +294,7 @@ def pose_frames(req: FramesReq):
     for v in req.values:
         kw = {"roll": {"phi_deg": v}, "heave": {"heave_mm": -v}, "bump": {"bump_o_mm": v}}[req.mode]
         frames.append(kinematics2d.solve_pose(ax.hardpoints, ax.hardpoints, ax.track_mm,
-                                              h_cg_mm=req.model.vehicle.h_cg_mm, **kw))
+                                              h_cg_mm=req.model.vehicle.h_cg_mm, bc=_bc(ax), **kw))
     return JSONResponse(_clean({"mode": req.mode, "values": req.values, "frames": frames}))
 
 

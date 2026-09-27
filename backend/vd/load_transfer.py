@@ -26,8 +26,15 @@ from .suspension import AxleSuspension
 DEG = math.pi / 180.0
 
 
-def compute(m: ModelIn, calc: Calc | None = None, ay_g: float | None = None) -> dict:
+def compute(m: ModelIn, calc: Calc | None = None, ay_g: float | None = None,
+            hrc_override: dict | None = None) -> dict:
     calc = calc or NullCalc()
+    from .derivation import quiet
+    with quiet(isinstance(calc, NullCalc)):
+        return _compute(m, calc, ay_g, hrc_override)
+
+
+def _compute(m, calc, ay_g, hrc_override):
     V, F, R, M = m.vehicle, m.front, m.rear, m.maneuver
     S0, S1 = "1. Mass distribution", "2. Body roll"
     g = M.g
@@ -73,10 +80,18 @@ def compute(m: ModelIn, calc: Calc | None = None, ay_g: float | None = None) -> 
                   rf"\frac{{{fmt(mt)}\cdot{fmt(h)}-2\cdot{fmt(muf)}\cdot{fmt(huf)}-2\cdot{fmt(mur)}\cdot{fmt(hur)}}}{{{fmt(ms)}}}",
                   (mt * h - 2 * muf * huf - 2 * mur * hur) / ms, "m", S0)
 
-    hrf = calc.add("h_rf", r"h_{rc,f}", "Front roll-centre height", r"h_{rc,f,[mm]}/1000",
-                   rf"{fmt(F.h_rc_mm)}/1000", F.h_rc_mm / 1000, "m", S1)
-    hrr = calc.add("h_rr", r"h_{rc,r}", "Rear roll-centre height", r"h_{rc,r,[mm]}/1000",
-                   rf"{fmt(R.h_rc_mm)}/1000", R.h_rc_mm / 1000, "m", S1)
+    if hrc_override:
+        hrf = calc.add("h_rf", r"h_{rc,f}", "Front roll-centre height (force-based, migrated)",
+                       r"h_{rc,eff}^{f}/1000\ 	ext{(section 2b)}", rf"{fmt(hrc_override['f'] * 1000)}/1000",
+                       hrc_override["f"], "m", S1)
+        hrr = calc.add("h_rr", r"h_{rc,r}", "Rear roll-centre height (force-based, migrated)",
+                       r"h_{rc,eff}^{r}/1000\ 	ext{(section 2b)}", rf"{fmt(hrc_override['r'] * 1000)}/1000",
+                       hrc_override["r"], "m", S1)
+    else:
+        hrf = calc.add("h_rf", r"h_{rc,f}", "Front roll-centre height", r"h_{rc,f,[mm]}/1000",
+                       rf"{fmt(F.h_rc_mm)}/1000", F.h_rc_mm / 1000, "m", S1)
+        hrr = calc.add("h_rr", r"h_{rc,r}", "Rear roll-centre height", r"h_{rc,r,[mm]}/1000",
+                       rf"{fmt(R.h_rc_mm)}/1000", R.h_rc_mm / 1000, "m", S1)
     hra = calc.add("h_ra", r"h_{ra}", "Roll-axis height below sprung CG",
                    r"h_{rc,f}+\left(h_{rc,r}-h_{rc,f}\right)\frac{a_s}{l}",
                    rf"{fmt(hrf)}+\left({fmt(hrr)}-{paren(hrf)}\right)\frac{{{fmt(a_s)}}}{{{fmt(l)}}}",
@@ -209,6 +224,14 @@ def solve_roll(susp, ms, ay, g, h1, grav, lim=0.35):
     if ay == 0:
         return 0.0
     f = lambda p: ms * ay * h1 + (ms * g * h1 * p if grav else 0.0) - susp["f"].static_moment(p) - susp["r"].static_moment(p)
+    # fast path: bracket around the linearised estimate
+    K0 = (susp["f"].static_moment(1e-4) + susp["r"].static_moment(1e-4)) / 1e-4 - (ms * g * h1 if grav else 0.0)
+    if K0 > 0:
+        pl = ms * ay * h1 / K0
+        for lo_, hi_ in ((0.7 * pl, 1.3 * pl), (0.3 * pl, 1.8 * pl)):
+            a_, b_ = min(lo_, hi_), max(lo_, hi_)
+            if a_ != b_ and f(a_) * f(b_) <= 0:
+                return brentq(f, a_, b_, xtol=1e-12)
     # search outward from 0 in the direction of the applied moment for a sign change
     sgn = 1.0 if ms * ay * h1 >= 0 else -1.0
     a, fa = 0.0, f(0.0)

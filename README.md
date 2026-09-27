@@ -6,6 +6,11 @@ Personal tools for learning and developing an FSAE suspension. The backend is Py
 
 - **v1:** steady state. It covers the geometric, elastic and unsprung load-transfer paths, a TMeasy tire model, slip angles and balance, the limit lateral acceleration, and an animated 2D front view of the double-wishbone kinematics.
 - **v2:** adds springs with progressive motion-ratio curves, bump stops, ARB and dampers, a **transient roll** model driven by a_y(t) or by a **road** of radii and speeds, **adaptive/absolute** parameter editing, and a **workspace** of snapping widgets.
+- **v3:**
+  - **Force-based geometric load transfer:** uses the instant-centre angles at the rolled pose and the inner/outer tyre force split, following OptimumG "Rolling about". This brings in **RC migration**, **jacking force** and the resulting ride-height change.
+  - **Bell-crank geometry:** the pushrod → rocker → spring layout gives MR(z), which sets the progressive rate.
+  - **2D maps** and a **target-driven optimiser**.
+  - A guided **7-step RC placement workflow**.
 
 > All default numbers are **placeholders**. Replace them with your own car and tire data.
 
@@ -46,6 +51,11 @@ Every derived number is produced through a derivation log (`backend/vd/derivatio
 | Corner mode | a_y = v²/R for the steady-state calculation | — |
 | Adaptive edits | RC height → inboard pivots move (ball joints and swing-arm length kept). Roll-stiffness target → spring rate (ARB share kept). Tire radius / camber → upright moves rigidly. The load-transfer RC is locked to the kinematic RC. Each adaptation is logged with its maths | — |
 
+| **Geometric LT, force-based** (`maneuver.geo_model = ic_angles`) | per wheel F_z,link = ±F_y tanθ_IC, with θ the angle of the contact patch → instant centre line at the **rolled pose**. The model gives ΔF_g = [F_y,o tanθ_o + F_y,i tanθ_i]/2 and jacking J = F_y,o tanθ_o − F_y,i tanθ_i. The inner/outer F_y split comes from the tyre model. Roll, loads, tyre split and IC angles are iterated to a fixed point. The effective RC height is h_eff = (t/2)[r tanθ_o + (1−r) tanθ_i]. Ride-height change ≈ J/(2k_w) | OptimumG "Rolling about" |
+| **Bell-crank** | the four-bar gives the LCA angle for wheel travel z. The pushrod end moves with the LCA or the upright. The rocker angle comes from the rigid pushrod length, which gives spring length and travel x_s(z), with MR = dx_s/dz (C2 spline) | — |
+| 2D map | any two parameters → any output (heatmap) + a second output (contours) | — |
+| Optimiser | objective = weighted targets (max/min, ≥, ≤, between). Space-filling samples, then bounded Powell. Adaptive rules apply to every evaluation | — |
+
 Consistency checks: the transient result settles exactly to the steady-state solution, the wheel rate is the derivative of the wheel force, and adaptive RC edits hit the target while keeping the swing-arm length. See `tests/`.
 
 The tire model needs only the nominal-load data. If you add the double-load data set (2F_zᴺ), it produces the degressive load sensitivity that makes load transfer cost grip.
@@ -60,6 +70,7 @@ The tire model needs only the nominal-load data. If you add the double-load data
 - **Transient**: OptimumG-style plots of the load-transfer components (N and % of suspended LT) against time, input a_y, roll, damper velocity, wheel loads and the road plan view. Includes a full derivation breakdown at any time instant, plus run metrics (e.g. damper share at t₀ + 50 ms).
 - **Springs & dampers**: MR, wheel rate, wheel force, roll stiffness and roll moment against roll, and damper force against velocity. One compare bar overlays several values of any parameter (e.g. MR slope 0 / 0.002 / 0.005).
 - **Workspace**: a 12-column snapping grid. You can add any widget (graphs, front view, value tiles with ƒ, sweeps, kinematic and tire curves, **pinned-parameter sliders**, **targets**), and use preset layouts, size presets, lock, tidy and focus mode (hides the sidebar). Workspaces are saved as JSON in `workspaces/`, so they're tracked in git. There are three examples: corner-entry dampers, RC-height study, and slow vs fast corner.
+- **RC placement workflow** (Workspace → `RC placement workflow`), in 7 steps: targets & baseline → place roll centres (map of front × rear RC against limit a_y, with LLTD contours) → RC migration & jacking against a_y → elastic distribution (optimiser) → bell-crank progression → dampers & corner entry → iterate over a_y and corners. Workspaces can have step pages (prev/next, “done” flags), and any workspace can be turned into a step-by-step workflow.
 - **Adaptive / Absolute** switch at the top of the sidebar. ↻ marks fields that act as design targets in adaptive mode.
 - **Baseline**: freeze the current setup, then graphs and tiles show baseline against current.
 - Road presets: slow hairpin, skidpad, fast sweeper, slalom.
@@ -80,6 +91,9 @@ backend/
   vd/suspension.py       spring + MR curve, bump stop, ARB, damper
   vd/transient.py        roll EOM, a_y(t) profiles, road model, metrics, probe derivations
   vd/adapt.py            adaptive parameter editing
+  vd/geo_coupling.py     force-based geometric LT, RC migration, jacking
+  vd/bellcrank.py        pushrod / rocker / spring kinematics -> MR(z)
+  vd/optimize.py         target-driven optimiser
   vd/sweep.py            parameter sweeps / comparisons
   vd/report.py           self-contained HTML report
 frontend/
@@ -100,8 +114,8 @@ tests/                   physics identities, limiting cases, API
 
 ## Roadmap
 
-1. Heave and pitch DOF with jacking forces (OptimumG "Rolling about": θ_IC angles and inner/outer side-force split), and ride height against a_y.
-2. Kinematic RC migration and camber fed into the load transfer and the tire (camber thrust).
-3. Bell-crank geometry → MR(z), replacing the curve input.
-4. Closed-loop steering input with tire relaxation.
+1. Heave and pitch DOF, so the jacking force moves the body in the dynamic model. Currently jacking is reported, and ride height is a linear estimate.
+2. Camber feeding the tyre force (camber thrust).
+3. Bell-crank FEA / topology optimisation export.
+4. Closed-loop steering input with tyre relaxation.
 5. 3D kinematics.

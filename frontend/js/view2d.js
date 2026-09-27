@@ -115,6 +115,26 @@ export class FrontView {
       out.push(T([q.cp[0], -222], tag === "o" ? "OUTER" : "INNER", "middle", "var(--muted)", fs * 0.75, `font-weight="600" letter-spacing="1"`));
     }
 
+    // ---------- bell-crank: pushrod, rocker, spring
+    for (const s of Object.values(pose.sides)) {
+      const r = s.rocker;
+      if (!r) continue;
+      out.push(L(r.P, r.A, "var(--link)", 2.5));
+      out.push(`<polygon points="${[r.O, r.A, r.B].map(P).join(" ")}" fill="var(--accent-2)" stroke="var(--upright)" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`);
+      // spring as a coil: zig-zag between B and C
+      const dx = r.C[0] - r.B[0], dz = r.C[1] - r.B[1], len = Math.hypot(dx, dz), ux = dx / len, uz = dz / len;
+      const nx = -uz, nz = ux, n = 10, amp = fs * 0.35, pts = [r.B];
+      for (let k = 1; k < n; k++) {
+        const f = 0.15 + 0.7 * k / n, side = k % 2 ? 1 : -1;
+        pts.push([r.B[0] + ux * len * f + nx * amp * side, r.B[1] + uz * len * f + nz * amp * side]);
+      }
+      pts.push(r.C);
+      out.push(`<polyline points="${pts.map(P).join(" ")}" fill="none" stroke="var(--load)" stroke-width="1.8" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`);
+      out.push(C(r.O, fs * 0.25, "var(--surface)", "var(--upright)", 2), C(r.C, fs * 0.2, "var(--surface)", "var(--link)", 1.5));
+      out.push(C(r.P, fs * 0.18, "var(--link)"), C(r.A, fs * 0.15, "var(--upright)"), C(r.B, fs * 0.15, "var(--upright)"));
+      out.push(T([(r.B[0] + r.C[0]) / 2, (r.B[1] + r.C[1]) / 2 + fs * 0.9], `x<tspan font-size="${fs * 0.6}" dy="${fs * 0.2}">s</tspan><tspan dy="${-fs * 0.2}"> ${r.xs.toFixed(1)}</tspan>`, "middle", "var(--load)", fs * 0.75));
+    }
+
     // ---------- CG
     if (pose.cg) {
       const g = pose.cg, r = fs * 0.55;

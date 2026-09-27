@@ -40,6 +40,13 @@ OUTPUTS: dict[str, tuple[str, str, str]] = {
     "r.Fy_max": ("Rear axle capacity", "N", "Tires & balance"),
     "f.lt_loss": ("Front force lost to LT", "N", "Tires & balance"),
     "r.lt_loss": ("Rear force lost to LT", "N", "Tires & balance"),
+    "f.h_rc_eff": ("Front effective RC height (migrated)", "mm", "Roll centre & jacking"),
+    "r.h_rc_eff": ("Rear effective RC height (migrated)", "mm", "Roll centre & jacking"),
+    "f.jack": ("Front jacking force (+ up)", "N", "Roll centre & jacking"),
+    "r.jack": ("Rear jacking force (+ up)", "N", "Roll centre & jacking"),
+    "f.dz_jack": ("Front ride-height change from jacking", "mm", "Roll centre & jacking"),
+    "r.dz_jack": ("Rear ride-height change from jacking", "mm", "Roll centre & jacking"),
+    "f.outer_share": ("Front outer-tyre share of side force", "-", "Roll centre & jacking"),
     "ay_max_g": ("Limit lateral acceleration", "g", "Limit"),
     "v_max_kmh": ("Limit speed on radius R", "km/h", "Limit"),
     "tr.phi_peak": ("Peak roll angle (transient)", "deg", "Transient"),
@@ -81,8 +88,13 @@ def set_path(d: dict, path: str, value) -> None:
 
 
 def with_param(base: ModelIn, path: str | None, value) -> ModelIn:
+    """Return a copy with one parameter changed. In adaptive mode the dependent
+    parameters follow (same rules as editing in the UI)."""
     if not path:
         return base
+    if base.param_mode == "adaptive" and path != "maneuver.ay_g" and not path.startswith("maneuver."):
+        from . import adapt
+        return adapt.apply(base, path, value)[0]
     d = base.model_dump()
     set_path(d, path, value)
     if path == "maneuver.ay_g":  # sweeping a_y directly overrides corner mode
@@ -99,9 +111,25 @@ def flat_outputs(m: ModelIn, include_limit: bool, include_transient: bool = Fals
     lt = r["lt"]
     o = {"phi_deg": lt["phi_deg"], "h1_mm": lt["h1"] * 1000, "lltd_front": lt["lltd_front"],
          "dalpha_deg": r["dalpha_deg"], "delta_deg": r["delta_deg"]}
-    for t in ("f", "r"):
+    geo = r.get("geo")
+    for t, ax in (("f", m.front), ("r", m.rear)):
         for k in ("dFz", "dFz_g", "dFz_e", "dFz_u", "geo_share", "el_share", "Fz_out", "Fz_in"):
             o[f"{t}.{k}"] = lt["axles"][t][k]
+        if geo:
+            a = geo["axles"][t]
+            o[f"{t}.h_rc_eff"] = geo["h"][t] * 1000
+            o[f"{t}.jack"] = a["J"]
+            o[f"{t}.outer_share"] = a["r"]
+            from .suspension import AxleSuspension
+            wf = m.vehicle.weight_front if t == "f" else 1 - m.vehicle.weight_front
+            su = AxleSuspension(ax, m.vehicle.mass_kg * wf - 2 * ax.unsprung_mass_kg, m.maneuver.g)
+            kw = su.K_direct / (1000 * su.t ** 2 / 2) if su.direct else su.wheel_rate(0.0)
+            o[f"{t}.dz_jack"] = a["J"] / (2 * kw) if kw > 0 else nan
+        else:
+            o[f"{t}.h_rc_eff"] = ax.h_rc_mm
+            o[f"{t}.jack"] = 0.0
+            o[f"{t}.dz_jack"] = 0.0
+            o[f"{t}.outer_share"] = nan
         for k in ("alpha_deg", "util", "Fy_max", "lt_loss"):
             o[f"{t}.{k}"] = r["axles"][t].get(k, nan)
     if include_limit:
@@ -187,3 +215,27 @@ def param_catalog(m: ModelIn) -> list[dict]:
                 out.append({"path": p, "value": v})
     walk(copy.deepcopy(m.model_dump()), "")
     return out
+
+
+def run_sweep2d(base: ModelIn, x_path: str, x_values: list[float], y_path: str, y_values: list[float],
+                include_limit: bool = False, include_transient: bool = False) -> dict:
+    """Grid over two parameters; returns every output as grid[y_index][x_index]."""
+    d = base.model_dump()
+    get_path(d, x_path); get_path(d, y_path)
+    grids = {k: [] for k in OUTPUTS}
+    for yv in y_values:
+        rows = {k: [] for k in OUTPUTS}
+        try:
+            my = with_param(base, y_path, yv)
+        except Exception:
+            my = None
+        for xv in x_values:
+            try:
+                o = flat_outputs(with_param(my, x_path, xv), include_limit, include_transient) if my else {}
+            except Exception:
+                o = {}
+            for k in OUTPUTS:
+                rows[k].append(_clean(o.get(k)))
+        for k in OUTPUTS:
+            grids[k].append(rows[k])
+    return {"x_path": x_path, "x": x_values, "y_path": y_path, "y": y_values, "grids": grids}

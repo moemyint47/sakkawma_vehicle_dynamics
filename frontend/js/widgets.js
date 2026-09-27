@@ -1,5 +1,5 @@
 // Widget library: every graph / view / tile that can live in a fixed tab or in the workspace grid.
-import { state, post, on, val, applyParam, setStatus, getPath } from "./store.js";
+import { state, post, on, val, applyParam, setStatus, getPath, replaceModel } from "./store.js";
 import { plotTheme } from "./plots.js";
 import { stepHTML, fmtNum } from "./derivations.js";
 import { LABELS, FIELD } from "./spec.js";
@@ -19,6 +19,7 @@ for (const [t, n] of [["f", "Front"], ["r", "Rear"]]) {
     [`${t}.v_d_out`]: [`${n} outer damper velocity`, "mm/s"], [`${t}.z_out`]: [`${n} outer wheel travel`, "mm"],
     [`${t}.pct_geo`]: [`${n} geometric share`, "%"], [`${t}.pct_damper`]: [`${n} damper share`, "%"],
     [`${t}.pct_spring`]: [`${n} spring share`, "%"], [`${t}.pct_arb`]: [`${n} ARB share`, "%"],
+    [`${t}.jack`]: [`${n} jacking force (+ up)`, "N"], [`${t}.dz_jack`]: [`${n} ride-height change from jacking`, "mm"],
   });
 }
 const COMP = [["geo", "Geometric", 0], ["spring", "Springs", 2], ["arb", "ARB", 3], ["damper", "Dampers", 6],
@@ -321,6 +322,124 @@ export const WIDGETS = {
     },
   },
 
+  "map2d": {
+    title: (c) => `${(state.defaults.outputs[c.output] || { label: c.output }).label} map`, size: [6, 6],
+    fields: [{ k: "x_path", label: "X parameter", type: "param" }, { k: "x0", label: "x from", type: "number" }, { k: "x1", label: "x to", type: "number" },
+             { k: "nx", label: "x points", type: "number" },
+             { k: "y_path", label: "Y parameter", type: "param" }, { k: "y0", label: "y from", type: "number" }, { k: "y1", label: "y to", type: "number" },
+             { k: "ny", label: "y points", type: "number" },
+             { k: "output", label: "Colour = output", type: "output" }, { k: "contour", label: "Contour lines = output", type: "output" },
+             { k: "limit", label: "compute limit a_y", type: "bool" }, { k: "transient", label: "transient metrics", type: "bool" }],
+    defaults: { x_path: "front.h_rc_mm", x0: -20, x1: 120, nx: 8, y_path: "rear.h_rc_mm", y0: 0, y1: 150, ny: 8,
+                output: "ay_max_g", contour: "lltd_front", limit: true, transient: false },
+    on: ["results"],
+    async render(el, c, host) {
+      const lin = (a, b, n) => Array.from({ length: n }, (_, k) => +(Number(a) + (Number(b) - Number(a)) * k / Math.max(1, n - 1)).toPrecision(8));
+      const nx = Math.max(2, Math.min(25, Number(c.nx) || 8)), ny = Math.max(2, Math.min(25, Number(c.ny) || 8));
+      const lim = c.limit || ["ay_max_g", "v_max_kmh"].includes(c.output) || ["ay_max_g", "v_max_kmh"].includes(c.contour);
+      const trn = c.transient || String(c.output).startsWith("tr.") || String(c.contour).startsWith("tr.");
+      const key = JSON.stringify([state.model, c]);
+      if (host.cacheKey !== key) {
+        if (!host.manual && host.cache) { /* keep old picture until re-run */ }
+        msg(el, `computing ${nx}×${ny} map…`);
+        try {
+          host.cache = await post("/api/sweep2d", { model: state.model, x_path: c.x_path, x_values: lin(c.x0, c.x1, nx),
+            y_path: c.y_path, y_values: lin(c.y0, c.y1, ny), include_limit: lim, include_transient: trn });
+          host.cacheKey = key;
+        } catch (e) { return msg(el, `map failed: ${e.message}`); }
+      }
+      const r = host.cache, { th, layout } = layoutFor();
+      const om = state.defaults.outputs[c.output] || { label: c.output, unit: "" };
+      const cm = state.defaults.outputs[c.contour] || { label: c.contour, unit: "" };
+      const dark = th.c[0];
+      const traces = [{ type: "heatmap", x: r.x, y: r.y, z: r.grids[c.output], colorscale: [[0, th.layout.paper_bgcolor], [1, dark]],
+        colorbar: { title: { text: om.unit, side: "right" }, thickness: 10, tickfont: { color: th.layout.xaxis.tickfont.color } },
+        hovertemplate: `x=%{x}<br>y=%{y}<br>${om.label}: %{z:.4g} ${om.unit}<extra></extra>` }];
+      if (c.contour && r.grids[c.contour]) traces.push({ type: "contour", x: r.x, y: r.y, z: r.grids[c.contour], showscale: false,
+        contours: { coloring: "none", showlabels: true, labelfont: { size: 10, color: th.layout.font.color } },
+        line: { color: th.layout.font.color, width: 1 }, name: cm.label, hovertemplate: `${cm.label}: %{z:.4g}<extra></extra>` });
+      const cx = getPath(state.model, c.x_path), cy = getPath(state.model, c.y_path);
+      traces.push({ type: "scatter", mode: "markers", x: [cx], y: [cy], name: "current", marker: { size: 11, symbol: "x", color: th.c[1] } });
+      plotInto(el, traces, { ...layout, hovermode: "closest", showlegend: false,
+        xaxis: ax(th, LABELS[c.x_path] || c.x_path), yaxis: ax(th, LABELS[c.y_path] || c.y_path),
+        annotations: [{ text: `colour: ${om.label}${c.contour ? ` · lines: ${cm.label}` : ""}`, xref: "paper", yref: "paper", x: 0, y: 1.02,
+          xanchor: "left", yanchor: "bottom", showarrow: false, font: { size: 10.5, color: th.layout.xaxis.tickfont.color } }] }, th.config);
+    },
+  },
+
+  "optimizer": {
+    title: () => "Optimiser (pinned parameters → targets)", size: [6, 6], workspaceOnly: true,
+    fields: [{ k: "max_evals", label: "max evaluations", type: "number" }], defaults: { max_evals: 60 }, on: [],
+    render(el, c, host) {
+      const ws = host.ws;
+      if (!ws) return msg(el, "Workspace only.");
+      const pins = ws.doc.pinned.filter((p) => typeof getPath(state.model, p.path) === "number");
+      if (!Array.isArray(c.vars)) c.vars = pins.map((p) => p.path);
+      const vars = pins.filter((p) => c.vars.includes(p.path));
+      const tgts = ws.doc.targets.filter((t) => !Array.isArray(c.targets) || c.targets.includes(t.key));
+      const res = host.result;
+      el.innerHTML = `<div class="opt">
+        <div class="small-text muted">Variables = ticked pinned parameters (their slider min…max are the bounds). Objective = the Targets widget. In adaptive mode dependent parameters follow. Transient / limit targets make each evaluation slower.</div>
+        <div class="o-vars"><b class="small-text">Variables</b>${pins.map((p) => `<label><input type="checkbox" value="${p.path}" ${c.vars.includes(p.path) ? "checked" : ""}> ${LABELS[p.path] || p.path} <span class="muted">[${p.min} … ${p.max}]</span></label>`).join("")}</div>
+        <div class="o-tgts"><b class="small-text">Targets used</b>${ws.doc.targets.map((t) => `<label><input type="checkbox" value="${t.key}" ${!Array.isArray(c.targets) || c.targets.includes(t.key) ? "checked" : ""}> ${t.key} (${t.op}${t.a !== undefined && ["ge", "le", "between"].includes(t.op) ? " " + t.a : ""}${t.op === "between" ? "…" + t.b : ""})</label>`).join("")}</div>
+        <div class="opt-bar"><b>${vars.length}</b> variables · <b>${tgts.length}</b> targets
+          <button class="small primary o-run">Run optimiser</button>${res && res.model ? `<button class="small o-apply">Apply best</button>` : ""}</div>
+        <div class="o-out"></div></div>`;
+      el.querySelectorAll(".o-vars input").forEach((cb) => cb.addEventListener("change", () => {
+        c.vars = [...el.querySelectorAll(".o-vars input:checked")].map((x) => x.value); host.changed(); this.render(el, c, host);
+      }));
+      el.querySelectorAll(".o-tgts input").forEach((cb) => cb.addEventListener("change", () => {
+        c.targets = [...el.querySelectorAll(".o-tgts input:checked")].map((x) => x.value); host.changed(); this.render(el, c, host);
+      }));
+      el.querySelector(".o-run").addEventListener("click", async () => {
+        const b = el.querySelector(".o-run"); b.disabled = true; b.textContent = "optimising…";
+        setStatus("optimising… (each evaluation runs the full model)");
+        try {
+          host.result = await post("/api/optimize", { model: state.model, max_evals: Number(c.max_evals) || 60,
+            variables: vars.map((p) => ({ path: p.path, min: p.min, max: p.max })),
+            targets: tgts.map((t) => ({ key: t.key, op: t.op, a: t.a, b: t.b, weight: t.weight || 1 })) });
+          setStatus(`optimiser: ${host.result.evals} evaluations in ${host.result.seconds.toFixed(1)} s`);
+        } catch (e) { setStatus(`optimiser: ${e.message}`, true); }
+        this.render(el, c, host);
+      });
+      const ap = el.querySelector(".o-apply");
+      if (ap) ap.addEventListener("click", () => { replaceModel(res.model); setStatus("optimised parameters applied – set a baseline first to compare"); });
+      if (!res) return;
+      const out = el.querySelector(".o-out");
+      out.innerHTML = `<div class="o-plot" style="height:150px;position:relative"></div>
+        <table class="vals small-text"><thead><tr><td>Variable / target</td><td class="n">start</td><td class="n">best</td></tr></thead><tbody>
+        ${vars.map((p, i) => `<tr><td>${LABELS[p.path] || p.path}</td><td class="n">${fmtNum(res.initial.x[i], 4)}</td><td class="n"><b>${fmtNum(res.best.x ? res.best.x[i] : null, 4)}</b></td></tr>`).join("")}
+        ${Object.keys(res.best.values).map((k) => `<tr><td>→ ${k}</td><td class="n">${fmtNum(res.best.start_values[k], 4)}</td><td class="n"><b>${fmtNum(res.best.values[k], 4)}</b></td></tr>`).join("")}
+        <tr><td>Objective J</td><td class="n">${fmtNum(res.initial.J, 4)}</td><td class="n"><b>${fmtNum(res.best.J, 4)}</b></td></tr></tbody></table>
+        <details><summary class="small-text">Objective & result derivation</summary>${res.steps.map((s) => stepHTML(s)).join("")}</details>`;
+      const { th, layout } = layoutFor();
+      let run = Infinity;
+      const best = res.history.map((h) => (run = Math.min(run, h.J)));
+      Plotly.newPlot(out.querySelector(".o-plot"), [
+        { y: res.history.map((h) => h.J), mode: "markers", name: "evaluation", marker: { size: 5, color: th.c[0] } },
+        { y: best, mode: "lines", name: "best so far", line: { color: th.layout.font.color, width: 2 } }],
+        { ...layout, margin: { l: 48, r: 8, t: 4, b: 30 }, xaxis: ax(th, "evaluation"), yaxis: ax(th, "J") }, { ...th.config, displayModeBar: false });
+    },
+  },
+
+  "notes": {
+    title: (c) => c.title || "Notes", size: [4, 4],
+    fields: [{ k: "title", label: "Title", type: "text" }, { k: "text", label: "Text (- bullets, **bold**)", type: "textarea" }],
+    defaults: { title: "Notes", text: "" }, on: [],
+    render(el, c) {
+      const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      const md = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`(.+?)`/g, "<code>$1</code>");
+      const lines = String(c.text || "").split("\n");
+      let html = "", inList = false;
+      for (const l of lines) {
+        if (/^\s*-\s+/.test(l)) { if (!inList) { html += "<ul>"; inList = true; } html += `<li>${md(l.replace(/^\s*-\s+/, ""))}</li>`; }
+        else { if (inList) { html += "</ul>"; inList = false; } if (l.trim()) html += `<p>${md(l)}</p>`; }
+      }
+      if (inList) html += "</ul>";
+      el.innerHTML = `<div class="notes">${html || '<span class="muted">Use ⚙ to write notes.</span>'}</div>`;
+    },
+  },
+
   "params": {
     title: () => "Pinned parameters", size: [3, 6], fields: [], defaults: {}, on: ["model", "adapted"], workspaceOnly: true,
     render(el, c, host) {
@@ -395,7 +514,8 @@ function fieldInput(f, v) {
   if (f.type === "select") return `<select data-k="${f.k}">${opt(f.options, v)}</select>`;
   if (f.type === "number") return `<input type="number" step="any" data-k="${f.k}" value="${v ?? ""}">`;
   if (f.type === "bool") return `<input type="checkbox" data-k="${f.k}" ${v ? "checked" : ""}>`;
-  if (f.type === "text") return `<input type="text" data-k="${f.k}" value="${v ?? ""}">`;
+  if (f.type === "text") return `<input type="text" data-k="${f.k}" value="${String(v ?? "").replace(/"/g, "&quot;")}">`;
+  if (f.type === "textarea") return `<textarea data-k="${f.k}" rows="8" cols="48">${String(v ?? "").replace(/</g, "&lt;")}</textarea>`;
   if (f.type === "param") return `<select data-k="${f.k}">${f.optional ? `<option value="">— none —</option>` : ""}${paramOptions(v)}</select>`;
   if (f.type === "output") return `<select data-k="${f.k}">${groupedOptions(state.defaults.outputs, v)}</select>`;
   if (f.type === "kinout") return `<select data-k="${f.k}">${opt(Object.fromEntries(Object.entries(state.defaults.kin_outputs).map(([k, m]) => [k, m.label])), v)}</select>`;

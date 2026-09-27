@@ -1,0 +1,716 @@
+{
+  "name": "RC placement workflow",
+  "description": "Guided 7-step workflow: targets \u2192 RC heights \u2192 migration & jacking \u2192 elastic distribution \u2192 bell-crank progression \u2192 dampers & corner entry \u2192 iterate.",
+  "pages": [
+    {
+      "title": "Targets & baseline",
+      "layout": [
+        {
+          "type": "notes",
+          "cfg": {
+            "title": "Step 1 \u2013 set the targets",
+            "text": "Goal: place the roll centres so the load-transfer distribution matches the targets, with **more geometric LT for a quick, stable response at peak**, then use a **bell-crank progressive rate** to stiffen the elastic path at large roll, and check it over several a_y and corners.\n\n- Set the targets on the right: LLTD front band (start near static front weight + 2\u20135 %), roll gradient, overshoot, geometric share at t0+50 ms, limit a_y.\n- Put your real car, tire and hardpoint data in the sidebar (all defaults are placeholders).\n- Switch **Geometric LT model = ic_angles** (sidebar \u2192 Manoeuvre) so RC migration and jacking are included.\n- Press **Set baseline** (top bar) before changing anything."
+          },
+          "x": 0,
+          "y": 0,
+          "w": 5,
+          "h": 7
+        },
+        {
+          "type": "targets",
+          "cfg": {},
+          "x": 5,
+          "y": 0,
+          "w": 7,
+          "h": 5
+        },
+        {
+          "type": "value",
+          "cfg": {
+            "key": "ay_max"
+          },
+          "x": 5,
+          "y": 5,
+          "w": 2,
+          "h": 2
+        },
+        {
+          "type": "value",
+          "cfg": {
+            "key": "lltd_front"
+          },
+          "x": 7,
+          "y": 5,
+          "w": 2,
+          "h": 2
+        },
+        {
+          "type": "value",
+          "cfg": {
+            "key": "roll_gradient"
+          },
+          "x": 9,
+          "y": 5,
+          "w": 3,
+          "h": 2
+        },
+        {
+          "type": "lt-bar",
+          "cfg": {},
+          "x": 0,
+          "y": 7,
+          "w": 6,
+          "h": 5
+        },
+        {
+          "type": "view2d",
+          "cfg": {
+            "axle": "front",
+            "mode": "roll",
+            "value": 1.0
+          },
+          "x": 6,
+          "y": 7,
+          "w": 6,
+          "h": 6
+        }
+      ]
+    },
+    {
+      "title": "Place roll centres",
+      "layout": [
+        {
+          "type": "notes",
+          "cfg": {
+            "title": "Step 2 \u2013 roll-centre heights",
+            "text": "The map shows the limit a_y (colour) and the LLTD (contour lines) over front \u00d7 rear RC height. In adaptive mode every point moves the inboard pivots at constant ball joints and swing-arm length.\n\n- Look for the region where the LLTD contour sits inside your band **and** limit a_y is high.\n- Prefer higher RCs for more geometric (instant) LT, but watch jacking in step 3.\n- Drag the pinned RC sliders to the chosen point; the front views show the new geometry."
+          },
+          "x": 0,
+          "y": 0,
+          "w": 4,
+          "h": 6
+        },
+        {
+          "type": "map2d",
+          "cfg": {
+            "x_path": "front.h_rc_mm",
+            "x0": -20,
+            "x1": 120,
+            "nx": 6,
+            "y_path": "rear.h_rc_mm",
+            "y0": 0,
+            "y1": 150,
+            "ny": 6,
+            "output": "ay_max_g",
+            "contour": "lltd_front",
+            "limit": true,
+            "transient": false
+          },
+          "x": 4,
+          "y": 0,
+          "w": 8,
+          "h": 7
+        },
+        {
+          "type": "params",
+          "cfg": {},
+          "x": 0,
+          "y": 6,
+          "w": 4,
+          "h": 6
+        },
+        {
+          "type": "value",
+          "cfg": {
+            "key": "f.geo_share"
+          },
+          "x": 4,
+          "y": 7,
+          "w": 2,
+          "h": 2
+        },
+        {
+          "type": "value",
+          "cfg": {
+            "key": "r.geo_share"
+          },
+          "x": 6,
+          "y": 7,
+          "w": 2,
+          "h": 2
+        },
+        {
+          "type": "value",
+          "cfg": {
+            "key": "lltd_front"
+          },
+          "x": 8,
+          "y": 7,
+          "w": 2,
+          "h": 2
+        },
+        {
+          "type": "value",
+          "cfg": {
+            "key": "ay_max"
+          },
+          "x": 10,
+          "y": 7,
+          "w": 2,
+          "h": 2
+        },
+        {
+          "type": "view2d",
+          "cfg": {
+            "axle": "front",
+            "mode": "roll",
+            "value": 1.0
+          },
+          "x": 4,
+          "y": 9,
+          "w": 4,
+          "h": 6
+        },
+        {
+          "type": "view2d",
+          "cfg": {
+            "axle": "rear",
+            "mode": "roll",
+            "value": 1.0
+          },
+          "x": 8,
+          "y": 9,
+          "w": 4,
+          "h": 6
+        }
+      ]
+    },
+    {
+      "title": "RC migration & jacking vs a_y",
+      "layout": [
+        {
+          "type": "notes",
+          "cfg": {
+            "title": "Step 3 \u2013 migration and jacking",
+            "text": "With the IC-angle model the geometric LT uses the instant centres **at the rolled pose** and the inner/outer tire force split.\n\n- Effective RC height vs a_y should stay close to the static value (small migration).\n- RC lateral migration per degree of roll: smaller is more predictable.\n- Jacking force / ride-height change: keep it small; a high RC lifts the body (OptimumG \u2018Rolling about\u2019).\n- Compare several front RC heights in each sweep (\u2699 \u2192 compare values)."
+          },
+          "x": 0,
+          "y": 0,
+          "w": 4,
+          "h": 6
+        },
+        {
+          "type": "sweep",
+          "cfg": {
+            "x_path": "maneuver.ay_g",
+            "x0": 0.2,
+            "x1": 1.6,
+            "n": 8,
+            "compare_path": "front.h_rc_mm",
+            "compare_values": "20, 50, 90",
+            "output": "f.h_rc_eff",
+            "limit": false,
+            "transient": false
+          },
+          "x": 4,
+          "y": 0,
+          "w": 4,
+          "h": 6
+        },
+        {
+          "type": "sweep",
+          "cfg": {
+            "x_path": "maneuver.ay_g",
+            "x0": 0.2,
+            "x1": 1.6,
+            "n": 8,
+            "compare_path": "front.h_rc_mm",
+            "compare_values": "20, 50, 90",
+            "output": "f.dz_jack",
+            "limit": false,
+            "transient": false
+          },
+          "x": 8,
+          "y": 0,
+          "w": 4,
+          "h": 6
+        },
+        {
+          "type": "kin",
+          "cfg": {
+            "axle": "front",
+            "mode": "roll",
+            "x0": -3,
+            "x1": 3,
+            "output": "rc_lateral_mm"
+          },
+          "x": 0,
+          "y": 6,
+          "w": 4,
+          "h": 5
+        },
+        {
+          "type": "sweep",
+          "cfg": {
+            "x_path": "maneuver.ay_g",
+            "x0": 0.2,
+            "x1": 1.6,
+            "n": 8,
+            "compare_path": "front.h_rc_mm",
+            "compare_values": "20, 50, 90",
+            "output": "f.geo_share",
+            "limit": false,
+            "transient": false
+          },
+          "x": 4,
+          "y": 6,
+          "w": 4,
+          "h": 5
+        },
+        {
+          "type": "sweep",
+          "cfg": {
+            "x_path": "maneuver.ay_g",
+            "x0": 0.2,
+            "x1": 1.6,
+            "n": 8,
+            "compare_path": "front.h_rc_mm",
+            "compare_values": "20, 50, 90",
+            "output": "f.outer_share",
+            "limit": false,
+            "transient": false
+          },
+          "x": 8,
+          "y": 6,
+          "w": 4,
+          "h": 5
+        }
+      ]
+    },
+    {
+      "title": "Elastic distribution",
+      "layout": [
+        {
+          "type": "notes",
+          "cfg": {
+            "title": "Step 4 \u2013 springs + ARB distribution",
+            "text": "Now match the **elastic** path to the geometry chosen above so the total LLTD lands in the band and the roll gradient is met.\n\n- Pinned: front/rear roll-stiffness targets and ARB shares (adaptive mode solves the spring rates).\n- Run the **optimiser**: it uses the pinned sliders as variables (their min/max are the bounds) and the Targets as the objective.\n- Apply the best result, then check it on the value tiles."
+          },
+          "x": 0,
+          "y": 0,
+          "w": 4,
+          "h": 6
+        },
+        {
+          "type": "params",
+          "cfg": {},
+          "x": 0,
+          "y": 6,
+          "w": 4,
+          "h": 7
+        },
+        {
+          "type": "optimizer",
+          "cfg": {
+            "max_evals": 40,
+            "vars": [
+              "front.roll_stiffness_Nm_deg",
+              "rear.roll_stiffness_Nm_deg"
+            ],
+            "targets": [
+              "ay_max",
+              "lltd_front",
+              "roll_gradient"
+            ]
+          },
+          "x": 4,
+          "y": 0,
+          "w": 5,
+          "h": 9
+        },
+        {
+          "type": "targets",
+          "cfg": {},
+          "x": 9,
+          "y": 0,
+          "w": 3,
+          "h": 9
+        },
+        {
+          "type": "value",
+          "cfg": {
+            "key": "lltd_front"
+          },
+          "x": 4,
+          "y": 9,
+          "w": 2,
+          "h": 2
+        },
+        {
+          "type": "value",
+          "cfg": {
+            "key": "roll_gradient"
+          },
+          "x": 6,
+          "y": 9,
+          "w": 3,
+          "h": 2
+        },
+        {
+          "type": "value",
+          "cfg": {
+            "key": "ay_max"
+          },
+          "x": 9,
+          "y": 9,
+          "w": 3,
+          "h": 2
+        },
+        {
+          "type": "lt-bar",
+          "cfg": {},
+          "x": 4,
+          "y": 11,
+          "w": 8,
+          "h": 5
+        }
+      ]
+    },
+    {
+      "title": "Bell-crank progression",
+      "layout": [
+        {
+          "type": "notes",
+          "cfg": {
+            "title": "Step 5 \u2013 progressive rate from the rocker",
+            "text": "The rocker geometry sets MR(z) and therefore the wheel rate k_s\u00b7MR\u00b2 + F_s\u00b7dMR/dz. A **rising** MR stiffens the elastic path at large roll: less final roll and less overshoot, without stiffening small inputs.\n\n- Edit the rocker points (sidebar \u2192 Front/Rear bell-crank) or pin them here.\n- Watch MR and wheel rate vs travel, roll stiffness vs roll angle.\n- The transient roll angle shows the effect on overshoot at corner entry."
+          },
+          "x": 0,
+          "y": 0,
+          "w": 4,
+          "h": 6
+        },
+        {
+          "type": "view2d",
+          "cfg": {
+            "axle": "front",
+            "mode": "heave",
+            "value": 20
+          },
+          "x": 4,
+          "y": 0,
+          "w": 4,
+          "h": 7
+        },
+        {
+          "type": "susp-curve",
+          "cfg": {
+            "axle": "both",
+            "kind": "mr"
+          },
+          "x": 8,
+          "y": 0,
+          "w": 4,
+          "h": 4
+        },
+        {
+          "type": "susp-curve",
+          "cfg": {
+            "axle": "both",
+            "kind": "kw"
+          },
+          "x": 8,
+          "y": 4,
+          "w": 4,
+          "h": 4
+        },
+        {
+          "type": "params",
+          "cfg": {},
+          "x": 0,
+          "y": 6,
+          "w": 4,
+          "h": 7
+        },
+        {
+          "type": "susp-curve",
+          "cfg": {
+            "axle": "both",
+            "kind": "roll_k"
+          },
+          "x": 4,
+          "y": 7,
+          "w": 4,
+          "h": 5
+        },
+        {
+          "type": "tr-series",
+          "cfg": {
+            "key": "phi_deg"
+          },
+          "x": 8,
+          "y": 8,
+          "w": 4,
+          "h": 5
+        }
+      ]
+    },
+    {
+      "title": "Dampers & corner entry",
+      "layout": [
+        {
+          "type": "notes",
+          "cfg": {
+            "title": "Step 6 \u2013 the inertial delay",
+            "text": "The first ~100 ms of a corner: geometric LT is instant, the elastic path needs roll, and the dampers carry most of the elastic part meanwhile (OptimumG \u2018Entry requirements\u2019).\n\n- Use road presets (sidebar \u2192 Transient input) for a **slow hairpin** and a **fast sweeper**.\n- Tune low-speed bump/rebound (pinned) and watch the % shares and overshoot.\n- Target: high geometric share at t0+50 ms, small overshoot."
+          },
+          "x": 0,
+          "y": 0,
+          "w": 4,
+          "h": 6
+        },
+        {
+          "type": "tr-components",
+          "cfg": {
+            "axle": "f",
+            "percent": "p"
+          },
+          "x": 4,
+          "y": 0,
+          "w": 4,
+          "h": 6
+        },
+        {
+          "type": "tr-components",
+          "cfg": {
+            "axle": "r",
+            "percent": "p"
+          },
+          "x": 8,
+          "y": 0,
+          "w": 4,
+          "h": 6
+        },
+        {
+          "type": "params",
+          "cfg": {},
+          "x": 0,
+          "y": 6,
+          "w": 4,
+          "h": 7
+        },
+        {
+          "type": "road",
+          "cfg": {},
+          "x": 4,
+          "y": 6,
+          "w": 3,
+          "h": 5
+        },
+        {
+          "type": "tr-series",
+          "cfg": {
+            "key": "f.jack"
+          },
+          "x": 7,
+          "y": 6,
+          "w": 5,
+          "h": 5
+        },
+        {
+          "type": "value",
+          "cfg": {
+            "key": "tr.f.pct_geo_50"
+          },
+          "x": 4,
+          "y": 11,
+          "w": 3,
+          "h": 2
+        },
+        {
+          "type": "value",
+          "cfg": {
+            "key": "tr.overshoot"
+          },
+          "x": 7,
+          "y": 11,
+          "w": 2,
+          "h": 2
+        },
+        {
+          "type": "value",
+          "cfg": {
+            "key": "tr.f.pct_damper_50"
+          },
+          "x": 9,
+          "y": 11,
+          "w": 3,
+          "h": 2
+        }
+      ]
+    },
+    {
+      "title": "Iterate over a_y & corners",
+      "layout": [
+        {
+          "type": "notes",
+          "cfg": {
+            "title": "Step 7 \u2013 iterate",
+            "text": "Close the loop over the operating range:\n\n- Sweep a_y with the RC heights compared (limit a_y and balance).\n- Run the optimiser again with **all** targets and the full set of pinned variables.\n- Compare against the baseline in every graph, then **Export report** for the chosen setup.\n- Save this workspace (it stores the step state, pinned variables and targets)."
+          },
+          "x": 0,
+          "y": 0,
+          "w": 4,
+          "h": 6
+        },
+        {
+          "type": "sweep",
+          "cfg": {
+            "x_path": "maneuver.ay_g",
+            "x0": 0.3,
+            "x1": 1.7,
+            "n": 8,
+            "compare_path": "front.h_rc_mm",
+            "compare_values": "20, 50, 90",
+            "output": "dalpha_deg",
+            "limit": false,
+            "transient": false
+          },
+          "x": 4,
+          "y": 0,
+          "w": 4,
+          "h": 6
+        },
+        {
+          "type": "sweep",
+          "cfg": {
+            "x_path": "front.h_rc_mm",
+            "x0": -20,
+            "x1": 120,
+            "n": 8,
+            "compare_path": "",
+            "compare_values": "",
+            "output": "ay_max_g",
+            "limit": true,
+            "transient": false
+          },
+          "x": 8,
+          "y": 0,
+          "w": 4,
+          "h": 6
+        },
+        {
+          "type": "optimizer",
+          "cfg": {
+            "max_evals": 40,
+            "vars": [
+              "front.h_rc_mm",
+              "rear.h_rc_mm",
+              "front.roll_stiffness_Nm_deg",
+              "rear.roll_stiffness_Nm_deg"
+            ],
+            "targets": [
+              "ay_max",
+              "lltd_front",
+              "roll_gradient",
+              "tr.overshoot",
+              "tr.f.pct_geo_50"
+            ]
+          },
+          "x": 0,
+          "y": 6,
+          "w": 6,
+          "h": 8
+        },
+        {
+          "type": "targets",
+          "cfg": {},
+          "x": 6,
+          "y": 6,
+          "w": 6,
+          "h": 5
+        },
+        {
+          "type": "params",
+          "cfg": {},
+          "x": 6,
+          "y": 11,
+          "w": 6,
+          "h": 6
+        }
+      ]
+    }
+  ],
+  "page": 0,
+  "layout": [],
+  "pinned": [
+    {
+      "path": "front.h_rc_mm",
+      "min": -20,
+      "max": 120,
+      "step": 1
+    },
+    {
+      "path": "rear.h_rc_mm",
+      "min": 0,
+      "max": 150,
+      "step": 1
+    },
+    {
+      "path": "front.roll_stiffness_Nm_deg",
+      "min": 200,
+      "max": 800,
+      "step": 5
+    },
+    {
+      "path": "rear.roll_stiffness_Nm_deg",
+      "min": 200,
+      "max": 800,
+      "step": 5
+    },
+    {
+      "path": "front.spring.bellcrank.rocker_spring.y",
+      "min": 140,
+      "max": 210,
+      "step": 1
+    },
+    {
+      "path": "front.damper.c_ls_bump",
+      "min": 500,
+      "max": 5000,
+      "step": 50
+    }
+  ],
+  "targets": [
+    {
+      "key": "ay_max",
+      "op": "max"
+    },
+    {
+      "key": "lltd_front",
+      "op": "between",
+      "a": 0.49,
+      "b": 0.53
+    },
+    {
+      "key": "roll_gradient",
+      "op": "le",
+      "a": 1.0
+    },
+    {
+      "key": "tr.overshoot",
+      "op": "le",
+      "a": 5
+    },
+    {
+      "key": "tr.f.pct_geo_50",
+      "op": "ge",
+      "a": 15
+    }
+  ],
+  "compare": {
+    "path": "",
+    "values": []
+  },
+  "model": null
+}

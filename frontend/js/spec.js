@@ -12,13 +12,26 @@ const axleFields = (ax) => [
 ];
 const springFields = (ax) => [
   [`${ax}.spring.rate_N_mm`, "Spring rate", "N/mm", 1],
-  [`${ax}.spring.mr_mode`, "Motion-ratio curve", "select:poly|table"],
+  [`${ax}.spring.mr_mode`, "Motion ratio from", "select:bellcrank|poly|table"],
   [`${ax}.spring.mr_c0`, "MR c0 (at ride height)", "–", 0.01],
   [`${ax}.spring.mr_c1`, "MR c1 (slope, + progressive)", "1/mm", 0.0005],
   [`${ax}.spring.mr_c2`, "MR c2 (curvature)", "1/mm²", 0.00001],
   [`${ax}.spring.mr_table`, "MR table: travel mm, MR", "table", 0, true],
   [`${ax}.spring.bump_gap_mm`, "Bump-stop gap (wheel)", "mm", 1, true],
   [`${ax}.spring.bump_rate_N_mm`, "Bump-stop rate (wheel)", "N/mm", 10],
+];
+const bcFields = (ax) => [
+  [`${ax}.spring.bellcrank.pushrod_on`, "Pushrod outboard end on", "select:lca|upright"],
+  [`${ax}.spring.bellcrank.pushrod_out.y`, "Pushrod outboard y", "mm", 1],
+  [`${ax}.spring.bellcrank.pushrod_out.z`, "Pushrod outboard z", "mm", 1],
+  [`${ax}.spring.bellcrank.rocker_pivot.y`, "Rocker pivot y", "mm", 1],
+  [`${ax}.spring.bellcrank.rocker_pivot.z`, "Rocker pivot z", "mm", 1],
+  [`${ax}.spring.bellcrank.rocker_pushrod.y`, "Rocker pushrod joint y", "mm", 1],
+  [`${ax}.spring.bellcrank.rocker_pushrod.z`, "Rocker pushrod joint z", "mm", 1],
+  [`${ax}.spring.bellcrank.rocker_spring.y`, "Rocker spring joint y", "mm", 1],
+  [`${ax}.spring.bellcrank.rocker_spring.z`, "Rocker spring joint z", "mm", 1],
+  [`${ax}.spring.bellcrank.spring_mount.y`, "Spring chassis mount y", "mm", 1],
+  [`${ax}.spring.bellcrank.spring_mount.z`, "Spring chassis mount z", "mm", 1],
 ];
 const damperFields = (ax) => [
   [`${ax}.damper.mr_mode`, "Damper motion ratio", "select:spring|constant"],
@@ -60,6 +73,7 @@ export const GROUPS = [
     ["maneuver.radius_m", "Path radius R", "m", 0.25],
     ["maneuver.speed_kmh", "Speed v (corner: a_y = v²/R)", "km/h", 1],
     ["maneuver.roll_gravity_term", "Include m·g·h₁·φ roll term", "bool"],
+    ["maneuver.geo_model", "Geometric LT model", "select:rc_height|ic_angles"],
   ]},
   { title: "Transient input a_y(t)", open: false, note: "Open-loop input; amplitude = a_y above.", fields: [
     ["maneuver.transient.profile", "Profile", "select:ramp|step|sine|csv|road"],
@@ -76,6 +90,9 @@ export const GROUPS = [
   { title: "Rear axle", open: true, fields: axleFields("rear") },
   { title: "Front spring & bump stop", open: false, note: "MR = spring travel / wheel travel; MR(z) = c0 + c1·z + c2·z² (z = wheel travel, mm, + bump).", fields: springFields("front") },
   { title: "Rear spring & bump stop", open: false, fields: springFields("rear") },
+  { title: "Front bell-crank (pushrod → rocker → spring)", open: false,
+    note: "Front-view layout, same axes as the hardpoints. Used when 'Motion ratio from' = bellcrank; MR(z) = d(spring travel)/d(wheel travel) is computed from it.", fields: bcFields("front") },
+  { title: "Rear bell-crank (pushrod → rocker → spring)", open: false, fields: bcFields("rear") },
   { title: "Front damper", open: false, note: "Force–velocity at the damper; + = bump.", fields: damperFields("front") },
   { title: "Rear damper", open: false, fields: damperFields("rear") },
   { title: "Tire (TMeasy lateral)", open: false, note:

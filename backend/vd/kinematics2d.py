@@ -129,7 +129,11 @@ def _body_to_ground(p_b: np.ndarray, phi: float, H: float) -> np.ndarray:
 
 
 def solve_side(geo: SideGeom, sign: int, phi: float, H: float, ground_z: float):
-    """Find theta so that the contact point touches the ground (height ground_z)."""
+    """Find theta so that the contact point touches the ground (height ground_z).
+
+    Coarse bracket near the design angle first (fast path), full scan as fallback;
+    the root closest to the design angle is taken.
+    """
     def f(th):
         ps = geo.pose(th)
         if ps is None:
@@ -137,29 +141,29 @@ def solve_side(geo: SideGeom, sign: int, phi: float, H: float, ground_z: float):
         return _body_to_ground(_to_body(ps["cp"], sign), phi, H)[1] - ground_z
 
     th0 = geo.theta0
-    span, n = 0.7, 140
-    grid = [th0 + span * (2 * k / n - 1) for k in range(n + 1)]
-    vals = [f(t) for t in grid]
-    best = None
-    for k in range(n):
-        a, b = vals[k], vals[k + 1]
-        if a is None or b is None:
-            continue
-        if a == 0:
-            cand = grid[k]
-        elif a * b < 0:
-            cand = brentq(lambda t: f(t), grid[k], grid[k + 1], xtol=1e-12)
-        else:
-            continue
-        if best is None or abs(cand - th0) < abs(best - th0):
-            best = cand
-    if best is None:
-        return None
-    return geo.pose(best) | {"theta": best}
+    for span, n in ((0.25, 20), (0.7, 140)):
+        grid = [th0 + span * (2 * k / n - 1) for k in range(n + 1)]
+        vals = [f(t) for t in grid]
+        best = None
+        for k in range(n):
+            a, b = vals[k], vals[k + 1]
+            if a is None or b is None:
+                continue
+            if a == 0:
+                cand = grid[k]
+            elif a * b < 0:
+                cand = brentq(lambda t: f(t), grid[k], grid[k + 1], xtol=1e-12)
+            else:
+                continue
+            if best is None or abs(cand - th0) < abs(best - th0):
+                best = cand
+        if best is not None:
+            return geo.pose(best) | {"theta": best}
+    return None
 
 
 def solve_pose(hp_o: Hardpoints, hp_i: Hardpoints, track_mm: float, *, phi_deg=0.0,
-               heave_mm=0.0, bump_o_mm=0.0, bump_i_mm=0.0, h_cg_mm: float | None = None) -> dict:
+               heave_mm=0.0, bump_o_mm=0.0, bump_i_mm=0.0, h_cg_mm: float | None = None, bc=None) -> dict:
     """Solve both sides for a body roll / heave / ground bump state.
 
     phi_deg   : body roll, + = outer side down
@@ -201,7 +205,19 @@ def solve_pose(hp_o: Hardpoints, hp_i: Hardpoints, track_mm: float, *, phi_deg=0
         tire = [c + e_lat * sx * w / 2 + e_up * sz * r for sx, sz in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
         rim_r = 0.55 * r
         rim = [c + e_lat * sx * w * 0.42 + e_up * sz * rim_r for sx, sz in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+        rocker = None
+        if bc is not None:
+            try:
+                from .bellcrank import BellCrank
+                st = BellCrank(hp, bc, track_mm).state_theta(ps["theta"])
+                bcr = BellCrank(hp, bc, track_mm)
+                rp = {"P": st["P"], "O": bcr.O, "A": st["A"], "B": st["B"], "C": bcr.C}
+                rocker = {k: _body_to_ground(_to_body(v, sign), phi, H).tolist() for k, v in rp.items()}
+                rocker["xs"] = st["xs"]
+            except ValueError:
+                rocker = None
         out["sides"][tag] = {
+            "rocker": rocker,
             "points": {k: v.tolist() for k, v in pts_g.items()},
             "tire": [p.tolist() for p in tire], "rim": [p.tolist() for p in rim],
             "ic": _body_to_ground(ic, phi, H).tolist() if ic is not None else None,
