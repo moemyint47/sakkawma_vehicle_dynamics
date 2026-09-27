@@ -49,7 +49,8 @@ def test_geometric_share_equals_hrc_over_hcg():
     # equal RC heights, no unsprung, no gravity term: eta_g = h_rc / h_cg on each axle
     m = model(front__unsprung_mass_kg=0, rear__unsprung_mass_kg=0, front__h_rc_mm=80, rear__h_rc_mm=80,
               maneuver__roll_gravity_term=False, front__track_mm=1200, rear__track_mm=1200,
-              rear__roll_stiffness_Nm_deg=380 * (0.53 / 0.47))  # K split = weight split
+              front__roll_stiffness_Nm_deg=380, rear__roll_stiffness_Nm_deg=380 * (0.53 / 0.47),
+              front__roll_stiffness_source="direct", rear__roll_stiffness_source="direct")  # K split = weight split
     r = load_transfer.compute(m)
     assert r["axles"]["f"]["geo_share"] == pytest.approx(80 / 290, rel=1e-9)
     assert r["axles"]["r"]["geo_share"] == pytest.approx(80 / 290, rel=1e-9)

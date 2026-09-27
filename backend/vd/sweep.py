@@ -42,6 +42,15 @@ OUTPUTS: dict[str, tuple[str, str, str]] = {
     "r.lt_loss": ("Rear force lost to LT", "N", "Tires & balance"),
     "ay_max_g": ("Limit lateral acceleration", "g", "Limit"),
     "v_max_kmh": ("Limit speed on radius R", "km/h", "Limit"),
+    "tr.phi_peak": ("Peak roll angle (transient)", "deg", "Transient"),
+    "tr.overshoot": ("Roll overshoot", "%", "Transient"),
+    "tr.t90": ("Time to 90 % roll", "s", "Transient"),
+    "tr.f.pct_geo_50": ("Front geometric share @ t0+50 ms", "%", "Transient"),
+    "tr.f.pct_damper_50": ("Front damper share @ t0+50 ms", "%", "Transient"),
+    "tr.r.pct_geo_50": ("Rear geometric share @ t0+50 ms", "%", "Transient"),
+    "tr.r.pct_damper_50": ("Rear damper share @ t0+50 ms", "%", "Transient"),
+    "tr.f.vdmax": ("Front peak damper velocity", "mm/s", "Transient"),
+    "tr.r.vdmax": ("Rear peak damper velocity", "mm/s", "Transient"),
 }
 
 KIN_OUTPUTS = {
@@ -58,7 +67,7 @@ KIN_OUTPUTS = {
 
 def get_path(d: dict, path: str) -> Any:
     for p in path.split("."):
-        d = d[p]
+        d = d[int(p)] if isinstance(d, list) else d[p]
     return d
 
 
@@ -76,10 +85,12 @@ def with_param(base: ModelIn, path: str | None, value) -> ModelIn:
         return base
     d = base.model_dump()
     set_path(d, path, value)
+    if path == "maneuver.ay_g":  # sweeping a_y directly overrides corner mode
+        d["maneuver"]["ay_source"] = "input"
     return ModelIn.model_validate(d)
 
 
-def flat_outputs(m: ModelIn, include_limit: bool) -> dict:
+def flat_outputs(m: ModelIn, include_limit: bool, include_transient: bool = False) -> dict:
     nan = float("nan")
     try:
         r = cornering.compute(m, NullCalc(), with_gradient=False)
@@ -99,6 +110,18 @@ def flat_outputs(m: ModelIn, include_limit: bool) -> dict:
         o["v_max_kmh"] = 3.6 * math.sqrt(L["ay_max_g"] * m.maneuver.g * m.maneuver.radius_m)
     else:
         o["ay_max_g"] = o["v_max_kmh"] = nan
+    if include_transient:
+        from . import transient
+        from .derivation import Calc
+        c = Calc()
+        try:
+            transient.simulate(m, c)
+            vals = {st.key: st.value for st in c.steps}
+        except Exception:
+            vals = {}
+        for k in OUTPUTS:
+            if k.startswith("tr."):
+                o[k] = vals.get(k, nan)
     return o
 
 
@@ -114,7 +137,8 @@ def _clean(v):
 
 
 def run_sweep(base: ModelIn, x_path: str, x_values: list[float], compare_path: str | None,
-              compare_values: list[float] | None, include_limit: bool = False) -> dict:
+              compare_values: list[float] | None, include_limit: bool = False,
+              include_transient: bool = False) -> dict:
     compare_values = compare_values if compare_path else [None]
     d = base.model_dump()
     for p in (x_path, compare_path):
@@ -127,7 +151,7 @@ def run_sweep(base: ModelIn, x_path: str, x_values: list[float], compare_path: s
         for xv in x_values:
             try:
                 mx = with_param(mc, x_path, xv)
-                o = flat_outputs(mx, include_limit)
+                o = flat_outputs(mx, include_limit, include_transient)
             except Exception:
                 o = {k: float("nan") for k in OUTPUTS}
             for k in OUTPUTS:

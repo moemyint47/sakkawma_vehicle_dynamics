@@ -32,3 +32,22 @@ def test_bad_input_rejected():
     bad = {**M, "vehicle": {**M["vehicle"], "mass_kg": -5}}
     assert c.post("/api/compute", json={"model": bad}).status_code == 422
     assert c.post("/api/sweep", json={"model": M, "x_path": "nope.x", "x_values": [1]}).status_code == 400
+
+
+def test_workspace_roundtrip(tmp_path, monkeypatch):
+    import backend.app as A
+    monkeypatch.setattr(A, "WORKSPACES", tmp_path)
+    body = {"name": "Test WS", "layout": [], "model": M}
+    assert c.put("/api/workspaces/test-ws", json=body).status_code == 200
+    assert any(w["id"] == "test-ws" for w in c.get("/api/workspaces").json())
+    assert c.get("/api/workspaces/test-ws").json()["name"] == "Test WS"
+    c.delete("/api/workspaces/test-ws")
+    assert c.get("/api/workspaces/test-ws").status_code == 404
+
+
+def test_adapt_and_transient_endpoints():
+    r = c.post("/api/adapt", json={"model": M, "path": "rear.h_rc_mm", "value": 30}).json()
+    assert any(ch["path"] == "rear.hardpoints.uca_in.z" for ch in r["changes"])
+    r = c.post("/api/transient", json={"model": M, "compare_path": "front.spring.mr_c1",
+                                       "compare_values": [0, 0.004]})
+    assert r.status_code == 200 and len(r.json()["series"]) == 2

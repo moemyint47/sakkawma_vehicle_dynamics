@@ -19,11 +19,13 @@ from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from vd import cornering, kin_summary, kinematics2d, report, sweep, tire  # noqa: E402
+from vd import adapt, cornering, kin_summary, kinematics2d, report, sweep, tire, transient  # noqa: E402
+from vd.suspension import AxleSuspension  # noqa: E402
 from vd.derivation import Calc  # noqa: E402
 from vd.schemas import ModelIn  # noqa: E402
 
 FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
+WORKSPACES = Path(__file__).resolve().parents[1] / "workspaces"
 
 app = FastAPI(title="Sakkawma Vehicle Dynamics", version="0.1.0")
 
@@ -39,12 +41,29 @@ def _clean(o):
     return o
 
 
-def full_calc(m: ModelIn) -> tuple[Calc, dict]:
+def full_calc(m: ModelIn, with_transient: bool = True) -> tuple[Calc, dict]:
     c = Calc()
     r = cornering.compute(m, c)
     lim = cornering.limit_ay(m, c)
     kin = kin_summary.compute(m, c)
-    return c, {"cornering": r, "limit": lim, "kin": kin}
+    tr = None
+    if with_transient:
+        try:
+            tr = transient.simulate(m, c)
+        except Exception as e:  # keep steady-state results usable
+            c.warn(f"Transient: {e}")
+    return c, {"cornering": r, "limit": lim, "kin": kin, "transient": tr}
+
+
+def susp_curves(m: ModelIn) -> dict:
+    out = {}
+    g = m.maneuver.g
+    for tag, ax, mf in (("f", m.front, m.vehicle.weight_front), ("r", m.rear, 1 - m.vehicle.weight_front)):
+        ms_ax = m.vehicle.mass_kg * mf - 2 * ax.unsprung_mass_kg
+        s = AxleSuspension(ax, ms_ax, g)
+        out[tag] = {"wheel": s.curves(), "roll": s.roll_curves(), "damper": s.damper_curve(),
+                    "direct": s.direct}
+    return out
 
 
 # ---------------------------------------------------------------- API models
@@ -75,6 +94,7 @@ class SweepReq(BaseModel):
     compare_path: Optional[str] = None
     compare_values: Optional[list[float]] = None
     include_limit: bool = False
+    include_transient: bool = False
 
 
 class KinSweepReq(BaseModel):
@@ -117,7 +137,100 @@ def compute(req: ComputeReq):
         "warnings": c.warnings,
         "limit": res["limit"],
         "kin": res["kin"],
+        "transient": res["transient"],
+        "susp": susp_curves(req.model),
     }))
+
+
+class AdaptReq(BaseModel):
+    model: ModelIn
+    path: str
+    value: object = None
+
+
+@app.post("/api/adapt")
+def adapt_param(req: AdaptReq):
+    try:
+        new, changes, c = adapt.apply(req.model, req.path, req.value)
+    except KeyError as e:
+        raise HTTPException(400, f"unknown parameter path {e}")
+    except (ValueError, TypeError) as e:
+        raise HTTPException(422, str(e))
+    return JSONResponse(_clean({"model": new.model_dump(), "changes": changes, "steps": c.to_list()}))
+
+
+class TransientCmpReq(BaseModel):
+    model: ModelIn
+    compare_path: Optional[str] = None
+    compare_values: Optional[list] = None
+
+
+@app.post("/api/transient")
+def transient_compare(req: TransientCmpReq):
+    vals = req.compare_values if req.compare_path else [None]
+    if len(vals) > 8:
+        raise HTTPException(400, "max 8 compare values")
+    series = []
+    for v in vals:
+        try:
+            mm = sweep.with_param(req.model, req.compare_path, v) if req.compare_path else req.model
+            series.append({"compare_value": v, "result": transient.simulate(mm), "susp": susp_curves(mm)})
+        except KeyError as e:
+            raise HTTPException(400, f"unknown parameter path {e}")
+        except Exception as e:
+            series.append({"compare_value": v, "error": str(e)})
+    return JSONResponse(_clean({"compare_path": req.compare_path, "series": series}))
+
+
+# ---------------------------------------------------------------- workspaces (files in /workspaces)
+import json as _json  # noqa: E402
+import re as _re  # noqa: E402
+
+
+def _ws_path(name: str) -> Path:
+    slug = _re.sub(r"[^a-z0-9_-]+", "-", name.strip().lower()).strip("-")
+    if not slug:
+        raise HTTPException(400, "invalid workspace name")
+    return WORKSPACES / f"{slug}.json"
+
+
+@app.get("/api/workspaces")
+def ws_list():
+    WORKSPACES.mkdir(exist_ok=True)
+    out = []
+    for f in sorted(WORKSPACES.glob("*.json")):
+        try:
+            d = _json.loads(f.read_text(encoding="utf-8"))
+            out.append({"id": f.stem, "name": d.get("name", f.stem), "description": d.get("description", "")})
+        except Exception:
+            continue
+    return out
+
+
+@app.get("/api/workspaces/{wid}")
+def ws_get(wid: str):
+    f = _ws_path(wid)
+    if not f.exists():
+        raise HTTPException(404, "workspace not found")
+    return _json.loads(f.read_text(encoding="utf-8"))
+
+
+@app.put("/api/workspaces/{wid}")
+def ws_put(wid: str, body: dict):
+    WORKSPACES.mkdir(exist_ok=True)
+    if "model" in body and body["model"] is not None:
+        ModelIn.model_validate(body["model"])  # validate parameter set
+    f = _ws_path(wid)
+    f.write_text(_json.dumps(body, indent=2), encoding="utf-8")
+    return {"id": f.stem, "saved": True}
+
+
+@app.delete("/api/workspaces/{wid}")
+def ws_delete(wid: str):
+    f = _ws_path(wid)
+    if f.exists():
+        f.unlink()
+    return {"deleted": True}
 
 
 @app.post("/api/pose")
@@ -145,11 +258,11 @@ def pose_frames(req: FramesReq):
 @app.post("/api/sweep")
 def run_sweep(req: SweepReq):
     n = len(req.x_values) * max(len(req.compare_values or [None]), 1)
-    if n > 2000 or (req.include_limit and n > 400):
-        raise HTTPException(400, "sweep too large (max 2000 points, 400 with limit a_y)")
+    if n > 2000 or (req.include_limit and n > 400) or (req.include_transient and n > 200):
+        raise HTTPException(400, "sweep too large (max 2000 points, 400 with limit a_y, 200 with transient)")
     try:
         res = sweep.run_sweep(req.model, req.x_path, req.x_values, req.compare_path,
-                              req.compare_values, req.include_limit)
+                              req.compare_values, req.include_limit, req.include_transient)
     except KeyError as e:
         raise HTTPException(400, f"unknown parameter path {e}")
     return JSONResponse(_clean(res))

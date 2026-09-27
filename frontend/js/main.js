@@ -1,105 +1,38 @@
-import { GROUPS, LABELS, getPath, setPath } from "./spec.js";
-import { S, setSteps, stepHTML, gotoStep } from "./derivations.js";
+import { LABELS, getPath } from "./spec.js";
+import { S, setSteps, stepHTML, gotoStep, renderAll } from "./derivations.js";
 import { renderResults } from "./results.js";
 import { FrontView, readouts } from "./view2d.js";
 import { plotSweep, plotKin, plotTire } from "./plots.js";
+import { state, post, setStatus, on, recompute, applyParam, replaceModel, loadLocal,
+  setBaseline, clearBaseline, setCompare } from "./store.js";
+import { buildForm, fillForm } from "./form.js";
+import { mountFixed, renderAllIn, paramOptions as wParamOptions } from "./widgets.js";
+import { Workspace } from "./workspace.js";
 
 const $ = (s) => document.querySelector(s);
-const STORE = "sakkawma.vd.model.v1";
-const state = { defaults: null, model: null, res: null, frames: null, framesKey: "", playing: false, viewDirty: true };
+const vs = { frames: null, framesKey: "", playing: false, viewDirty: true };
+let ws = null;
 
-// ------------------------------------------------------------------ API
-async function post(url, body, asText = false) {
-  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!r.ok) {
-    let msg = `${r.status}`;
-    try {
-      const j = await r.json();
-      msg = Array.isArray(j.detail) ? j.detail.map((d) => `${d.loc.slice(1).join(".")}: ${d.msg}`).join("; ") : j.detail || msg;
-    } catch { /* ignore */ }
-    throw new Error(msg);
-  }
-  return asText ? r.text() : r.json();
-}
-const setStatus = (t, err = false) => { const s = $("#status"); s.textContent = t; s.classList.toggle("err", err); };
+on("model", () => { vs.viewDirty = true; });
+on("results", (res) => {
+  setSteps(res.steps);
+  renderResults(res, state.defaults);
+  refreshTire();
+  if (activeTab() === "view") refreshView();
+  renderTransientDeriv(res);
+  const pr = $("#tr-probe");
+  if (pr && document.activeElement !== pr) pr.value = state.model.maneuver.transient.t_probe_s;
+});
 
-const save = () => { try { localStorage.setItem(STORE, JSON.stringify(state.model)); } catch { /* storage unavailable */ } };
-const loadSaved = () => { try { const t = localStorage.getItem(STORE); return t ? JSON.parse(t) : null; } catch { return null; } };
-
-// ------------------------------------------------------------------ form
-function buildForm() {
-  const host = $("#form");
-  host.innerHTML = `<div class="placeholder-banner">Default numbers are <b>placeholders</b> – replace them with your car and tire data.</div>`;
-  for (const g of GROUPS) {
-    const d = document.createElement("details");
-    d.open = g.open;
-    d.innerHTML = `<summary>${g.title}</summary>${g.note ? `<div class="gnote">${g.note}</div>` : ""}`;
-    for (const [path, label, unit, step, nullable] of g.fields) {
-      const row = document.createElement("div");
-      row.className = "frow";
-      row.dataset.path = path;
-      const id = `in-${path.replace(/\./g, "_")}`;
-      if (unit === "bool") {
-        row.innerHTML = `<label for="${id}">${label}</label><input type="checkbox" id="${id}"><span></span>`;
-      } else {
-        row.innerHTML = `<label for="${id}" title="${path}">${label}</label>
-          <input type="number" id="${id}" step="${step}" ${nullable ? 'placeholder="(none)"' : ""}><span class="u">${unit}</span>`;
-      }
-      const inp = row.querySelector("input");
-      inp.addEventListener(unit === "bool" ? "change" : "input", () => {
-        let v;
-        if (unit === "bool") v = inp.checked;
-        else if (inp.value === "") { if (!nullable) return; v = null; }
-        else { v = Number(inp.value); if (!Number.isFinite(v)) return; }
-        setPath(state.model, path, v);
-        markChanged(row, path);
-        onModelChange();
-      });
-      d.appendChild(row);
-    }
-    host.appendChild(d);
-  }
-  fillForm();
-}
-
-function fillForm() {
-  document.querySelectorAll(".frow").forEach((row) => {
-    const p = row.dataset.path, inp = row.querySelector("input"), v = getPath(state.model, p);
-    if (inp.type === "checkbox") inp.checked = !!v; else inp.value = v == null ? "" : v;
-    markChanged(row, p);
-  });
-}
-
-function markChanged(row, p) {
-  row.classList.toggle("changed", getPath(state.model, p) !== getPath(state.defaults.model, p));
-}
-
-let tmr = null;
-function onModelChange() {
-  save();
-  state.viewDirty = true;
-  clearTimeout(tmr);
-  tmr = setTimeout(recompute, 180);
-}
-
-// ------------------------------------------------------------------ compute
-async function recompute() {
-  const t0 = performance.now();
-  setStatus("computing…");
-  try {
-    const res = await post("/api/compute", { model: state.model });
-    res.radius = state.model.maneuver.radius_m;
-    state.res = res;
-    setSteps(res.steps);
-    renderResults(res, state.defaults);
-    setStatus(`updated · ${Math.round(performance.now() - t0)} ms`);
-    refreshTire();
-    if (activeTab() === "view") refreshView();
-    return true;
-  } catch (e) {
-    setStatus(`error: ${e.message}`, true);
-    return false;
-  }
+function renderTransientDeriv(res) {
+  const el = $("#tr-deriv");
+  if (!el) return;
+  const secs = res.steps.filter((s) => s.key.startsWith("p.") || s.key.startsWith("tr."));
+  const keep = S.steps;
+  S.steps = secs;
+  renderAll(el);
+  S.steps = keep;
+  el.querySelectorAll("details").forEach((d) => (d.open = true));
 }
 
 // ------------------------------------------------------------------ derivation popovers
@@ -138,6 +71,9 @@ document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () 
   document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === b));
   document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === `tab-${b.dataset.tab}`));
   if (b.dataset.tab === "view") refreshView();
+  if (b.dataset.tab === "transient") renderAllIn($("#tr-grid"));
+  if (b.dataset.tab === "susp") renderAllIn($("#su-grid"));
+  if (b.dataset.tab === "ws" && ws) ws.show();
   requestAnimationFrame(() => document.querySelectorAll(`#tab-${b.dataset.tab} .js-plotly-plot`).forEach((p) => Plotly.Plots.resize(p)));
 }));
 
@@ -152,10 +88,10 @@ async function refreshView() {
   const n = Math.round((b - a) / st);
   const values = Array.from({ length: n + 1 }, (_, k) => +(a + k * st).toFixed(4));
   const key = JSON.stringify([axle, vmode, state.model[axle], state.model.vehicle.h_cg_mm]);
-  if (key !== state.framesKey || state.viewDirty) {
+  if (key !== vs.framesKey || vs.viewDirty) {
     try {
       const r = await post("/api/pose_frames", { model: state.model, axle, mode: vmode, values });
-      state.frames = r; state.framesKey = key; state.viewDirty = false;
+      vs.frames = r; vs.framesKey = key; vs.viewDirty = false;
       const i0 = values.indexOf(0);
       view.setStatic(r.frames[i0]);
     } catch (e) { setStatus(`view: ${e.message}`, true); return; }
@@ -164,12 +100,12 @@ async function refreshView() {
 }
 
 function currentFrame() {
-  if (!state.frames) return null;
+  if (!vs.frames) return null;
   const v = Number($("#v-slider").value);
-  const vals = state.frames.values;
+  const vals = vs.frames.values;
   let best = 0;
   for (let i = 1; i < vals.length; i++) if (Math.abs(vals[i] - v) < Math.abs(vals[best] - v)) best = i;
-  return state.frames.frames[best];
+  return vs.frames.frames[best];
 }
 
 function loadsData() {
@@ -212,13 +148,13 @@ $("#v-fromay").addEventListener("click", () => {
   drawCurrent();
 });
 $("#v-play").addEventListener("click", () => {
-  state.playing = !state.playing;
-  $("#v-play").textContent = state.playing ? "❚❚ Pause" : "▶ Animate";
-  if (!state.playing) return;
+  vs.playing = !vs.playing;
+  $("#v-play").textContent = vs.playing ? "❚❚ Pause" : "▶ Animate";
+  if (!vs.playing) return;
   const sl = $("#v-slider");
   let t0 = performance.now();
   const step = (now) => {
-    if (!state.playing) return;
+    if (!vs.playing) return;
     const a = Number(sl.min), b = Number(sl.max);
     const ph = ((now - t0) / 3000) * 2 * Math.PI;
     sl.value = (0.5 * (a + b) + 0.5 * (b - a) * Math.sin(ph)).toFixed(3);
@@ -281,10 +217,11 @@ async function runSweep() {
   let sel = [...document.querySelectorAll("#s-outs input:checked")].map((i) => i.value);
   const lim = $("#s-lim").checked;
   if (lim && !sel.includes("ay_max_g")) sel = ["ay_max_g", ...sel];
+  const trn = sel.some((k) => k.startsWith("tr."));
   setStatus("sweeping…");
   const t0 = performance.now();
   try {
-    const r = await post("/api/sweep", { model: state.model, x_path: xp, x_values: xs, compare_path: cp, compare_values: cv, include_limit: lim });
+    const r = await post("/api/sweep", { model: state.model, x_path: xp, x_values: xs, compare_path: cp, compare_values: cv, include_limit: lim, include_transient: trn });
     plotSweep($("#s-plots"), r, state.defaults.outputs, sel);
     setStatus(`sweep · ${Math.round(performance.now() - t0)} ms`);
   } catch (e) { setStatus(`sweep: ${e.message}`, true); }
@@ -329,14 +266,14 @@ $("#file-in").addEventListener("change", async (e) => {
   const f = e.target.files[0]; if (!f) return;
   try {
     const m = JSON.parse(await f.text());
-    await post("/api/compute", { model: m }); // validate first
-    state.model = m; fillForm(); onModelChange(); setStatus(`loaded ${f.name}`);
+    await post("/api/adapt", { model: m, path: "param_mode", value: m.param_mode || "absolute" }); // validates
+    replaceModel(m); setStatus(`loaded ${f.name}`);
   } catch (err) { setStatus(`load failed: ${err.message}`, true); }
   e.target.value = "";
 });
 $("#btn-reset").addEventListener("click", () => {
   if (!confirm("Replace all parameters with the placeholder defaults?")) return;
-  state.model = structuredClone(state.defaults.model); fillForm(); onModelChange();
+  replaceModel(structuredClone(state.defaults.model));
 });
 $("#btn-report").addEventListener("click", async () => {
   setStatus("building report…");
@@ -350,13 +287,38 @@ $("#btn-report").addEventListener("click", async () => {
     setStatus("report downloaded");
   } catch (e) { setStatus(`report: ${e.message}`, true); }
 });
-$("#btn-copy-rc").addEventListener("click", () => {
+$("#btn-copy-rc").addEventListener("click", async () => {
   const k = state.res && state.res.kin;
   if (!k || !k.front || !k.rear) return;
-  state.model.front.h_rc_mm = +k.front.h_rc_mm.toFixed(2);
-  state.model.rear.h_rc_mm = +k.rear.h_rc_mm.toFixed(2);
-  fillForm(); onModelChange();
+  await applyParam("front.h_rc_mm", +k.front.h_rc_mm.toFixed(3));
+  await applyParam("rear.h_rc_mm", +k.rear.h_rc_mm.toFixed(3));
 });
+$("#btn-base").addEventListener("click", () => {
+  setBaseline();
+  $("#btn-base-clr").hidden = false;
+  $("#base-info").textContent = `baseline @ ${new Date().toLocaleTimeString()}`;
+});
+$("#btn-base-clr").addEventListener("click", () => { clearBaseline(); $("#btn-base-clr").hidden = true; $("#base-info").textContent = ""; });
+$("#tr-probe").addEventListener("change", (e) => applyParam("maneuver.transient.t_probe_s", Number(e.target.value)));
+
+// ------------------------------------------------------------------ compare bars (shared by Transient, Springs & dampers)
+function mountCompareBars() {
+  document.querySelectorAll(".cmpbar").forEach((el) => {
+    el.innerHTML = `<label>Compare <select class="cb-p"><option value="">— none —</option>${wParamOptions("")}</select></label>
+      <label>values <input type="text" class="cb-v" placeholder="e.g. 900, 1800, 3600" style="width:170px"></label>
+      <button class="small primary cb-run">Run</button> <button class="small ghost cb-clr">Clear</button>`;
+    el.querySelector(".cb-run").addEventListener("click", () => {
+      const p = el.querySelector(".cb-p").value;
+      const v = el.querySelector(".cb-v").value.split(/[,;\s]+/).filter(Boolean).map(Number).filter(Number.isFinite);
+      syncBars(p, el.querySelector(".cb-v").value);
+      setCompare(p, v);
+    });
+    el.querySelector(".cb-clr").addEventListener("click", () => { syncBars("", ""); setCompare("", []); });
+  });
+}
+function syncBars(p, v) {
+  document.querySelectorAll(".cmpbar").forEach((el) => { el.querySelector(".cb-p").value = p; el.querySelector(".cb-v").value = v; });
+}
 
 // ------------------------------------------------------------------ boot
 (async function boot() {
@@ -364,12 +326,24 @@ $("#btn-copy-rc").addEventListener("click", () => {
     const r = await fetch("/api/defaults");
     state.defaults = await r.json();
   } catch (e) { setStatus("backend not reachable", true); return; }
-  state.model = loadSaved() || structuredClone(state.defaults.model);
+  state.model = loadLocal() || structuredClone(state.defaults.model);
   buildForm();
   initSweeps();
   initKin();
-  if (!(await recompute()) && loadSaved()) {
+  mountCompareBars();
+  if (!(await recompute())) {
     // saved set from an older version is invalid -> fall back to defaults
     state.model = structuredClone(state.defaults.model); fillForm(); await recompute();
   }
+  mountFixed($("#tr-grid"), [
+    ["tr-series", { key: "ay_g" }, 4], ["tr-series", { key: "phi_deg" }, 4], ["road", {}, 4],
+    ["tr-components", { axle: "f" }, 6], ["tr-components", { axle: "r" }, 6],
+    ["tr-components", { axle: "f", percent: "p" }, 6], ["tr-components", { axle: "r", percent: "p" }, 6],
+    ["tr-series", { key: "f.damper" }, 4], ["tr-series", { key: "f.v_d_out" }, 4], ["tr-series", { key: "f.Fz_in" }, 4],
+  ]);
+  mountFixed($("#su-grid"), [
+    ["susp-curve", { kind: "mr" }, 4], ["susp-curve", { kind: "kw" }, 4], ["susp-curve", { kind: "fw" }, 4],
+    ["susp-curve", { kind: "roll_k" }, 4], ["susp-curve", { kind: "roll_m" }, 4], ["susp-curve", { kind: "damper" }, 4],
+  ]);
+  ws = new Workspace($("#ws-root"));
 })();

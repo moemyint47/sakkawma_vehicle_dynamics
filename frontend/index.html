@@ -5,15 +5,20 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Sakkawma VD</title>
   <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="/static/vendor/gridstack/gridstack.min.css">
   <link rel="stylesheet" href="/static/css/app.css">
   <script src="/static/vendor/katex/katex.min.js"></script>
   <script src="/static/vendor/plotly/plotly.min.js"></script>
+  <script src="/static/vendor/gridstack/gridstack-all.js"></script>
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><span class="logo">◧</span> Sakkawma VD <span class="sub">Lateral load transfer · v1</span></div>
+  <div class="brand"><span class="logo">◧</span> Sakkawma VD <span class="sub">Lateral load transfer · v2</span></div>
   <div class="actions">
     <span id="status" class="status"></span>
+    <span id="base-info" class="status"></span>
+    <button id="btn-base" class="ghost" title="Freeze the current setup; graphs overlay baseline vs current">Set baseline</button>
+    <button id="btn-base-clr" class="ghost" hidden>Clear baseline</button>
     <button id="btn-load" class="ghost" title="Load a parameter set (JSON)">Load</button>
     <button id="btn-save" class="ghost" title="Save the current parameter set (JSON)">Save</button>
     <button id="btn-reset" class="ghost" title="Restore placeholder defaults">Defaults</button>
@@ -28,6 +33,9 @@
   <main class="main">
     <nav class="tabs" role="tablist">
       <button class="tab active" data-tab="results">Results</button>
+      <button class="tab" data-tab="transient">Transient</button>
+      <button class="tab" data-tab="susp">Springs &amp; dampers</button>
+      <button class="tab" data-tab="ws">Workspace</button>
       <button class="tab" data-tab="view">Front view</button>
       <button class="tab" data-tab="sweeps">Sweeps &amp; compare</button>
       <button class="tab" data-tab="kin">Kinematic curves</button>
@@ -54,6 +62,25 @@
       </div>
       <div class="card"><h3>Model assumptions</h3><ol id="assumptions" class="small-text"></ol></div>
     </section>
+
+    <!-- TRANSIENT -->
+    <section class="panel" id="tab-transient">
+      <div class="toolbar"><span class="cmpbar"></span>
+        <label>Derivation at t = <input type="number" id="tr-probe" step="0.01" style="width:80px"> s</label>
+        <span class="muted small-text">Input profile, road &amp; timing: sidebar → “Transient input a_y(t)”.</span></div>
+      <div class="fixed-grid" id="tr-grid"></div>
+      <div class="card"><h3>Transient derivations <span class="muted">(breakdown at the probe time and run metrics)</span></h3><div id="tr-deriv"></div></div>
+    </section>
+
+    <!-- SPRINGS & DAMPERS -->
+    <section class="panel" id="tab-susp">
+      <div class="toolbar"><span class="cmpbar"></span>
+        <span class="muted small-text">Spring, motion-ratio and damper inputs: sidebar → “… spring &amp; bump stop”, “… damper”.</span></div>
+      <div class="fixed-grid" id="su-grid"></div>
+    </section>
+
+    <!-- WORKSPACE -->
+    <section class="panel" id="tab-ws"><div id="ws-root"></div></section>
 
     <!-- FRONT VIEW -->
     <section class="panel" id="tab-view">

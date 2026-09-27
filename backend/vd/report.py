@@ -23,6 +23,15 @@ ASSUMPTIONS = [
     "Both wheels of an axle operate at the same slip angle (no toe, Ackermann or compliance steer).",
     "Front-view kinematics: planar four-bar per side, rigid links, radially rigid tire (contact point on "
     "the wheel plane at loaded radius); roll about the body point on the centreline at ground level.",
+    "Springs act through a motion-ratio curve MR(z); wheel force F_w = F_s MR, wheel rate k_s MR^2 + F_s dMR/dz "
+    "(virtual work); preload solved for static equilibrium at z = 0; bump stops and ARB linear at the wheel.",
+    "Transient: roll-only body (no heave/pitch), open-loop a_y(t) input, I_ra = I_xx,cg + m_s h1^2; "
+    "wheel travel +-(t/2) phi; geometric and unsprung load transfer instantaneous; net vertical force from "
+    "asymmetric elements (progressive springs, bump/rebound damping) is reacted (no jacking yet).",
+    "Road profile: a_y = v^2 kappa(s) with linear curvature (clothoid) transitions between segments.",
+    "Adaptive mode: edits keep the design intent (RC height moves inboard pivots at constant ball joints and "
+    "swing-arm length; roll-stiffness target solves the spring rate at constant ARB share; tire radius / camber "
+    "move the upright rigidly); the load-transfer RC is locked to the kinematic RC.",
 ]
 
 

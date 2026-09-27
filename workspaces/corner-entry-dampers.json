@@ -1,0 +1,142 @@
+{
+  "name": "Corner entry \u2013 dampers vs geometry",
+  "description": "OptimumG 'Entry requirements' study: how dampers and RC height share the load transfer in the first 100 ms.",
+  "layout": [
+    {
+      "type": "params",
+      "x": 0,
+      "y": 0,
+      "w": 3,
+      "h": 9,
+      "cfg": {}
+    },
+    {
+      "type": "value",
+      "x": 3,
+      "y": 0,
+      "w": 3,
+      "h": 2,
+      "cfg": {
+        "key": "tr.f.pct_damper_50"
+      }
+    },
+    {
+      "type": "value",
+      "x": 6,
+      "y": 0,
+      "w": 3,
+      "h": 2,
+      "cfg": {
+        "key": "tr.f.pct_geo_50"
+      }
+    },
+    {
+      "type": "value",
+      "x": 9,
+      "y": 0,
+      "w": 3,
+      "h": 2,
+      "cfg": {
+        "key": "tr.overshoot"
+      }
+    },
+    {
+      "type": "tr-components",
+      "x": 3,
+      "y": 2,
+      "w": 5,
+      "h": 7,
+      "cfg": {
+        "axle": "f",
+        "percent": "n"
+      }
+    },
+    {
+      "type": "tr-components",
+      "x": 8,
+      "y": 2,
+      "w": 4,
+      "h": 7,
+      "cfg": {
+        "axle": "f",
+        "percent": "p"
+      }
+    },
+    {
+      "type": "susp-curve",
+      "x": 0,
+      "y": 9,
+      "w": 4,
+      "h": 5,
+      "cfg": {
+        "axle": "f",
+        "kind": "damper"
+      }
+    },
+    {
+      "type": "tr-series",
+      "x": 4,
+      "y": 9,
+      "w": 4,
+      "h": 5,
+      "cfg": {
+        "key": "phi_deg"
+      }
+    },
+    {
+      "type": "targets",
+      "x": 8,
+      "y": 9,
+      "w": 4,
+      "h": 5,
+      "cfg": {}
+    }
+  ],
+  "pinned": [
+    {
+      "path": "front.damper.c_ls_bump",
+      "min": 500,
+      "max": 5000,
+      "step": 50
+    },
+    {
+      "path": "front.damper.c_ls_reb",
+      "min": 500,
+      "max": 6000,
+      "step": 50
+    },
+    {
+      "path": "front.h_rc_mm",
+      "min": -75,
+      "max": 120,
+      "step": 1
+    },
+    {
+      "path": "maneuver.transient.rise_s",
+      "min": 0.05,
+      "max": 0.6,
+      "step": 0.01
+    }
+  ],
+  "targets": [
+    {
+      "key": "tr.overshoot",
+      "op": "le",
+      "a": 5
+    },
+    {
+      "key": "tr.f.pct_geo_50",
+      "op": "max"
+    },
+    {
+      "key": "roll_gradient",
+      "op": "le",
+      "a": 1.0
+    }
+  ],
+  "compare": {
+    "path": "",
+    "values": []
+  },
+  "model": null
+}

@@ -1,0 +1,74 @@
+{
+  "name": "Slow vs fast corner (road)",
+  "description": "Same a_y reached through a tight slow corner and a wide fast one: onset rate changes the damper/geometric split.",
+  "layout": [
+    {
+      "type": "road",
+      "x": 0,
+      "y": 0,
+      "w": 4,
+      "h": 6,
+      "cfg": {}
+    },
+    {
+      "type": "tr-series",
+      "x": 4,
+      "y": 0,
+      "w": 4,
+      "h": 6,
+      "cfg": {
+        "key": "ay_g"
+      }
+    },
+    {
+      "type": "tr-series",
+      "x": 8,
+      "y": 0,
+      "w": 4,
+      "h": 6,
+      "cfg": {
+        "key": "f.pct_damper"
+      }
+    },
+    {
+      "type": "tr-components",
+      "x": 0,
+      "y": 6,
+      "w": 6,
+      "h": 6,
+      "cfg": {
+        "axle": "f",
+        "percent": "n"
+      }
+    },
+    {
+      "type": "tr-components",
+      "x": 6,
+      "y": 6,
+      "w": 6,
+      "h": 6,
+      "cfg": {
+        "axle": "r",
+        "percent": "n"
+      }
+    }
+  ],
+  "pinned": [
+    {
+      "path": "maneuver.transient.road_transition_m",
+      "min": 0,
+      "max": 15,
+      "step": 0.5
+    }
+  ],
+  "targets": [],
+  "compare": {
+    "path": "maneuver.transient.road_transition_m",
+    "values": [
+      1,
+      4,
+      10
+    ]
+  },
+  "model": null
+}

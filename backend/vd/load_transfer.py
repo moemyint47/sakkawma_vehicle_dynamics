@@ -21,6 +21,7 @@ import math
 
 from .derivation import Calc, NullCalc, fmt, paren
 from .schemas import ModelIn
+from .suspension import AxleSuspension
 
 DEG = math.pi / 180.0
 
@@ -30,10 +31,16 @@ def compute(m: ModelIn, calc: Calc | None = None, ay_g: float | None = None) -> 
     V, F, R, M = m.vehicle, m.front, m.rear, m.maneuver
     S0, S1 = "1. Mass distribution", "2. Body roll"
     g = M.g
-    ay_g = M.ay_g if ay_g is None else ay_g
-
-    ay = calc.add("ay", r"a_y", "Lateral acceleration", r"a_{y,[g]}\cdot g",
-                  rf"{fmt(ay_g)}\cdot{fmt(g)}", ay_g * g, "m/s²", S0)
+    if ay_g is None and M.ay_source == "corner":
+        v = M.speed_kmh / 3.6
+        ay = calc.add("ay", r"a_y", "Lateral acceleration (corner: speed & radius)", r"\frac{v^2}{R}",
+                      rf"\frac{{({fmt(M.speed_kmh)}/3.6)^2}}{{{fmt(M.radius_m)}}}", v * v / M.radius_m, "m/s²", S0)
+        ay_g = ay / g
+        calc.add("ay_g", r"a_{y,[g]}", "Lateral acceleration in g", r"a_y/g", rf"{fmt(ay)}/{fmt(g)}", ay_g, "g", S0)
+    else:
+        ay_g = M.ay_g if ay_g is None else ay_g
+        ay = calc.add("ay", r"a_y", "Lateral acceleration", r"a_{y,[g]}\cdot g",
+                      rf"{fmt(ay_g)}\cdot{fmt(g)}", ay_g * g, "m/s²", S0)
     mt = V.mass_kg
     wf = V.weight_front
     l = calc.add("l", r"l", "Wheelbase", r"l_{[mm]}/1000", rf"{fmt(V.wheelbase_mm)}/1000",
@@ -78,27 +85,47 @@ def compute(m: ModelIn, calc: Calc | None = None, ay_g: float | None = None) -> 
                   rf"{fmt(hs)}-{paren(hra)}", hs - hra, "m", S1)
     if h1 < 0:
         calc.warn("Roll axis lies ABOVE the sprung CG (h1 < 0): the body rolls into the turn.")
-    Kf = calc.add("K_f", r"K_{\phi,f}", "Front roll stiffness", r"K_{\phi,f,[Nm/^\circ]}\cdot\frac{180}{\pi}",
-                  rf"{fmt(F.roll_stiffness_Nm_deg)}\cdot\frac{{180}}{{\pi}}",
-                  F.roll_stiffness_Nm_deg / DEG, "N·m/rad", S1)
-    Kr = calc.add("K_r", r"K_{\phi,r}", "Rear roll stiffness", r"K_{\phi,r,[Nm/^\circ]}\cdot\frac{180}{\pi}",
-                  rf"{fmt(R.roll_stiffness_Nm_deg)}\cdot\frac{{180}}{{\pi}}",
-                  R.roll_stiffness_Nm_deg / DEG, "N·m/rad", S1)
-    if M.roll_gravity_term:
-        den = Kf + Kr - ms * g * h1
-        if den <= 0:
-            calc.warn("Roll stiffness too low: K_f + K_r ≤ m_s g h1 (statically unstable in roll).")
-            den = float("nan")
-        phi = calc.add("phi", r"\phi", "Body roll angle",
-                       r"\frac{m_s\,a_y\,h_1}{K_{\phi,f}+K_{\phi,r}-m_s\,g\,h_1}",
-                       rf"\frac{{{fmt(ms)}\cdot{fmt(ay)}\cdot{paren(h1)}}}{{{fmt(Kf)}+{fmt(Kr)}-{fmt(ms)}\cdot{fmt(g)}\cdot{paren(h1)}}}",
-                       ms * ay * h1 / den, "rad", S1,
-                       note="small-angle; includes the lateral shift of the sprung CG (m_s g h1 phi)")
+    susp = {"f": AxleSuspension(F, msf, g), "r": AxleSuspension(R, msr, g)}
+    Ks = {}
+    for tag, AX, name in (("f", F, "Front"), ("r", R, "Rear")):
+        su = susp[tag]
+        if su.direct:
+            Ks[tag] = calc.add(f"K_{tag}", rf"K_{{\phi,{tag}}}", f"{name} roll stiffness (direct input)",
+                               rf"K_{{\phi,{tag},[Nm/^\circ]}}\cdot\frac{{180}}{{\pi}}",
+                               rf"{fmt(AX.roll_stiffness_Nm_deg)}\cdot\frac{{180}}{{\pi}}",
+                               AX.roll_stiffness_Nm_deg / DEG, "N·m/rad", S1)
+        else:
+            Ks[tag] = record_rates(su, calc, tag, name)
+    Kf, Kr = Ks["f"], Ks["r"]
+    all_direct = susp["f"].direct and susp["r"].direct
+    grav = M.roll_gravity_term
+    if all_direct:
+        if grav:
+            den = Kf + Kr - ms * g * h1
+            if den <= 0:
+                calc.warn("Roll stiffness too low: K_f + K_r \u2264 m_s g h1 (statically unstable in roll).")
+                den = float("nan")
+            phi = calc.add("phi", r"\phi", "Body roll angle",
+                           r"\frac{m_s\,a_y\,h_1}{K_{\phi,f}+K_{\phi,r}-m_s\,g\,h_1}",
+                           rf"\frac{{{fmt(ms)}\cdot{fmt(ay)}\cdot{paren(h1)}}}{{{fmt(Kf)}+{fmt(Kr)}-{fmt(ms)}\cdot{fmt(g)}\cdot{paren(h1)}}}",
+                           ms * ay * h1 / den, "rad", S1,
+                           note="small-angle; includes the lateral shift of the sprung CG (m_s g h1 phi)")
+        else:
+            phi = calc.add("phi", r"\phi", "Body roll angle",
+                           r"\frac{m_s\,a_y\,h_1}{K_{\phi,f}+K_{\phi,r}}",
+                           rf"\frac{{{fmt(ms)}\cdot{fmt(ay)}\cdot{paren(h1)}}}{{{fmt(Kf)}+{fmt(Kr)}}}",
+                           ms * ay * h1 / (Kf + Kr), "rad", S1, note="small-angle, gravity term neglected")
     else:
-        phi = calc.add("phi", r"\phi", "Body roll angle",
-                       r"\frac{m_s\,a_y\,h_1}{K_{\phi,f}+K_{\phi,r}}",
-                       rf"\frac{{{fmt(ms)}\cdot{fmt(ay)}\cdot{paren(h1)}}}{{{fmt(Kf)}+{fmt(Kr)}}}",
-                       ms * ay * h1 / (Kf + Kr), "rad", S1, note="small-angle, gravity term neglected")
+        phi = solve_roll(susp, ms, ay, g, h1, grav)
+        if math.isnan(phi):
+            calc.warn("No static roll equilibrium found within \u00b120\u00b0 (suspension too soft or bump stops missing).")
+        lin = ms * ay * h1 / (Kf + Kr - (ms * g * h1 if grav else 0.0))
+        calc.add("phi", r"\phi", "Body roll angle (nonlinear equilibrium)",
+                 r"\text{root of }\ m_s a_y h_1" + (r"+m_s g h_1\phi" if grav else "") +
+                 r"-M_f(\phi)-M_r(\phi)=0,\quad M(\phi)=t\,\left[\Delta F_{spring}+\Delta F_{bump}+\Delta F_{ARB}\right]",
+                 rf"\text{{Brent's method; linear estimate }}\ \frac{{{fmt(ms)}\cdot{fmt(ay)}\cdot{paren(h1)}}}{{{fmt(Kf)}+{fmt(Kr)}" +
+                 (rf"-{fmt(ms)}\cdot{fmt(g)}\cdot{paren(h1)}" if grav else "") + rf"}}={fmt(lin)}",
+                 phi, "rad", S1, note="progressive springs / bump stops make M(phi) nonlinear")
     phi_deg = calc.add("phi_deg", r"\phi", "Body roll angle", r"\phi\cdot\frac{180}{\pi}",
                        rf"{fmt(phi)}\cdot\frac{{180}}{{\pi}}", phi / DEG, "deg", S1)
     if ay_g > 0:
@@ -109,6 +136,7 @@ def compute(m: ModelIn, calc: Calc | None = None, ay_g: float | None = None) -> 
            "m_f": mf, "m_r": mr, "axles": {}}
     for tag, AX, t, m_ax, ms_ax, mu, hu, hrc, K in (
             ("f", F, tf, mf, msf, muf, huf, hrf, Kf), ("r", R, tr, mr, msr, mur, hur, hrr, Kr)):
+        K = Ks[tag]
         name = "Front" if tag == "f" else "Rear"
         S = f"3. {name} axle load transfer"
         du = calc.add(f"{tag}.dFz_u", rf"\Delta F_{{z,u}}^{{{tag}}}", f"{name}: direct (unsprung) load transfer",
@@ -119,10 +147,14 @@ def compute(m: ModelIn, calc: Calc | None = None, ay_g: float | None = None) -> 
                       rf"\frac{{m_{{s,{tag}}}\,a_y\,h_{{rc,{tag}}}}}{{t_{tag}}}",
                       rf"\frac{{{fmt(ms_ax)}\cdot{fmt(ay)}\cdot{paren(hrc)}}}{{{fmt(t)}}}",
                       ms_ax * ay * hrc / t, "N", S, note="transmitted by the suspension links, no roll needed")
-        de = calc.add(f"{tag}.dFz_e", rf"\Delta F_{{z,e}}^{{{tag}}}", f"{name}: elastic load transfer",
-                      rf"\frac{{K_{{\phi,{tag}}}\,\phi}}{{t_{tag}}}",
-                      rf"\frac{{{fmt(K)}\cdot{paren(phi)}}}{{{fmt(t)}}}",
-                      K * phi / t, "N", S, note="transmitted by springs/ARB, requires body roll")
+        if susp[tag].direct:
+            de = calc.add(f"{tag}.dFz_e", rf"\Delta F_{{z,e}}^{{{tag}}}", f"{name}: elastic load transfer",
+                          rf"\frac{{K_{{\phi,{tag}}}\,\phi}}{{t_{tag}}}",
+                          rf"\frac{{{fmt(K)}\cdot{paren(phi)}}}{{{fmt(t)}}}",
+                          K * phi / t, "N", S, note="transmitted by springs/ARB, requires body roll")
+            parts = {"spring": de, "bump": 0.0, "arb": 0.0}
+        else:
+            de, parts = record_elastic(susp[tag], phi, calc, tag, name, S)
         dt = calc.add(f"{tag}.dFz", rf"\Delta F_z^{{{tag}}}", f"{name}: total load transfer (per wheel)",
                       rf"\Delta F_{{z,u}}^{{{tag}}}+\Delta F_{{z,g}}^{{{tag}}}+\Delta F_{{z,e}}^{{{tag}}}",
                       rf"{fmt(du)}+{paren(dg)}+{paren(de)}", du + dg + de, "N", S)
@@ -145,7 +177,8 @@ def compute(m: ModelIn, calc: Calc | None = None, ay_g: float | None = None) -> 
                       rf"F_{{z,0}}^{{{tag}}}-\Delta F_z^{{{tag}}}", rf"{fmt(fs)}-{paren(dt)}", fs - dt, "N", S4)
         if fi < 0:
             calc.warn(f"{name} inner wheel lifts (F_z,i < 0) - results beyond this a_y are not physical.")
-        res["axles"][tag] = dict(dFz_u=du, dFz_g=dg, dFz_e=de, dFz=dt, geo_share=geo_share,
+        res["axles"][tag] = dict(dFz_u=du, dFz_g=dg, dFz_e=de, dFz=dt, dFz_e_spring=parts["spring"],
+                                 dFz_e_bump=parts["bump"], dFz_e_arb=parts["arb"], geo_share=geo_share,
                                  el_share=el_share, Fz_static=fs, Fz_out=fo, Fz_in=fi, track=t)
 
     S5 = "5. Load transfer distribution"
@@ -168,3 +201,86 @@ def compute(m: ModelIn, calc: Calc | None = None, ay_g: float | None = None) -> 
              expected, "N·m", S5, note="must equal the line above (consistency check)")
     res["moment_check"] = (moment, expected)
     return res
+
+
+def solve_roll(susp, ms, ay, g, h1, grav, lim=0.35):
+    """Static roll equilibrium with nonlinear suspension moments."""
+    from scipy.optimize import brentq
+    if ay == 0:
+        return 0.0
+    f = lambda p: ms * ay * h1 + (ms * g * h1 * p if grav else 0.0) - susp["f"].static_moment(p) - susp["r"].static_moment(p)
+    # search outward from 0 in the direction of the applied moment for a sign change
+    sgn = 1.0 if ms * ay * h1 >= 0 else -1.0
+    a, fa = 0.0, f(0.0)
+    n = 70
+    for k in range(1, n + 1):
+        b = sgn * lim * k / n
+        fb = f(b)
+        if fa * fb <= 0:
+            return brentq(f, min(a, b), max(a, b), xtol=1e-12)
+        a, fa = b, fb
+    return float("nan")
+
+
+def record_rates(su, calc, tag, name):
+    """Derivation of the linearised roll stiffness from spring, MR, ARB (returns N·m/rad)."""
+    S = f"2a. {name} springs, motion ratio & ARB"
+    ax = su.ax
+    sp = ax.spring
+    calc.add(f"{tag}.W_s", rf"W_{{s,{tag}}}", f"{name}: static sprung corner load", rf"\frac{{m_{{s,{tag}}}\,g}}{{2}}",
+             rf"\frac{{{fmt(su.W * 2 / 9.81 if False else su.W * 2)}}}{{2}}", su.W, "N", S)
+    mr0 = calc.add(f"{tag}.MR0", rf"MR_{{{tag}}}(0)", f"{name}: motion ratio at ride height",
+                   r"c_0" if su.mr.mode == "poly" else r"\text{PCHIP}(z=0)", fmt(su.mr0), su.mr0, "-", S,
+                   note="MR = d(spring travel)/d(wheel travel)")
+    dmr0 = su.mr.dmr(0.0)
+    calc.add(f"{tag}.dMR0", rf"MR'_{{{tag}}}(0)", f"{name}: motion-ratio slope at ride height",
+             r"c_1" if su.mr.mode == "poly" else r"\frac{d\,\text{PCHIP}}{dz}(0)", fmt(dmr0), dmr0, "1/mm", S,
+             note="> 0 = progressive (rising rate)")
+    fs0 = calc.add(f"{tag}.Fs0", rf"F_{{s0,{tag}}}", f"{name}: spring preload (static equilibrium)",
+                   rf"\frac{{W_{{s,{tag}}}}}{{MR(0)}}", rf"\frac{{{fmt(su.W)}}}{{{fmt(su.mr0)}}}", su.Fs0, "N", S)
+    kw0 = su.wheel_rate(0.0)
+    calc.add(f"{tag}.kw0", rf"k_{{w,{tag}}}(0)", f"{name}: wheel rate at ride height",
+             r"k_s\,MR(0)^2+F_{s0}\,MR'(0)", rf"{fmt(su.ks)}\cdot{fmt(su.mr0)}^2+{fmt(fs0)}\cdot{paren(dmr0)}",
+             kw0, "N/mm", S, ref="virtual work: F_w = F_s MR, k_w = dF_w/dz")
+    calc.add(f"{tag}.karb", rf"k_{{ARB,{tag}}}", f"{name}: ARB rate at the wheel", r"\text{input}", fmt(su.karb),
+             su.karb, "N/mm", S)
+    K = calc.add(f"K_{tag}", rf"K_{{\phi,{tag}}}", f"{name}: linearised roll stiffness (at \u03c6 = 0)",
+                 rf"\left(k_{{w,{tag}}}(0)+k_{{ARB,{tag}}}\right)\cdot1000\cdot\frac{{t_{tag}^2}}{{2}}",
+                 rf"\left({fmt(kw0)}+{fmt(su.karb)}\right)\cdot1000\cdot\frac{{{fmt(su.t)}^2}}{{2}}",
+                 su.linear_roll_stiffness(), "N·m/rad", S)
+    calc.add(f"K_{tag}_deg", rf"K_{{\phi,{tag}}}", f"{name}: linearised roll stiffness", r"K_{\phi}\cdot\frac{\pi}{180}",
+             rf"{fmt(K)}\cdot\frac{{\pi}}{{180}}", K * DEG, "N·m/deg", S)
+    return K
+
+
+def record_elastic(su, phi, calc, tag, name, S):
+    """Elastic load transfer from the individual elements at roll angle phi."""
+    c = su.components(phi)
+    zo, zi = c["z_o"], c["z_i"]
+    calc.add(f"{tag}.z_o", rf"z_{{o,{tag}}}", f"{name}: outer wheel travel (jounce +)",
+             rf"\frac{{t_{tag}}}{{2}}\cdot1000\cdot\phi", rf"\frac{{{fmt(su.t)}}}{{2}}\cdot1000\cdot{paren(phi)}", zo, "mm", S)
+    for side, z in (("o", zo), ("i", zi)):
+        mr, xs, Fs = su.mr.mr(z), su.mr.xs(z), su.spring_force(z)
+        calc.add(f"{tag}.Fw_{side}", rf"F_{{w,{side}}}^{{{tag}}}", f"{name}: {'outer' if side == 'o' else 'inner'} spring force at wheel",
+                 r"\left[F_{s0}+k_s\,x_s(z)\right]MR(z),\ x_s=\int_0^z MR\,dz",
+                 rf"\left[{fmt(su.Fs0)}+{fmt(su.ks)}\cdot{paren(xs)}\right]\cdot{fmt(mr)}", Fs * mr, "N", S,
+                 note=f"z = {z:.3f} mm, MR(z) = {mr:.5f}, x_s = {xs:.4f} mm")
+    Fo, Fi = su.spring_wheel(zo), su.spring_wheel(zi)
+    sp = calc.add(f"{tag}.dFz_e_spring", rf"\Delta F_{{z,spring}}^{{{tag}}}", f"{name}: elastic LT via springs",
+                  r"\frac{F_{w,o}-F_{w,i}}{2}", rf"\frac{{{fmt(Fo)}-{fmt(Fi)}}}{{2}}", c["spring"], "N", S)
+    gap = su.gap
+    bp = calc.add(f"{tag}.dFz_e_bump", rf"\Delta F_{{z,bump}}^{{{tag}}}", f"{name}: elastic LT via bump stops",
+                  r"\frac{k_b\,(z_o-g_b)^+-k_b\,(z_i-g_b)^+}{2}",
+                  (rf"\frac{{{fmt(su.kb)}\cdot({fmt(zo)}-{fmt(gap)})^+-{fmt(su.kb)}\cdot({paren(zi)}-{fmt(gap)})^+}}{{2}}"
+                   if gap is not None else r"0\ (\text{no bump stop})"), c["bump"], "N", S)
+    ab = calc.add(f"{tag}.dFz_e_arb", rf"\Delta F_{{z,ARB}}^{{{tag}}}", f"{name}: elastic LT via ARB",
+                  r"k_{ARB}\,\frac{z_o-z_i}{2}", rf"{fmt(su.karb)}\cdot\frac{{{fmt(zo)}-{paren(zi)}}}{{2}}", c["arb"], "N", S)
+    de = calc.add(f"{tag}.dFz_e", rf"\Delta F_{{z,e}}^{{{tag}}}", f"{name}: elastic load transfer",
+                  r"\Delta F_{z,spring}+\Delta F_{z,bump}+\Delta F_{z,ARB}", rf"{fmt(sp)}+{paren(bp)}+{paren(ab)}",
+                  sp + bp + ab, "N", S, note="transmitted by springs, bump stops and ARB; requires body roll")
+    if phi != 0:
+        calc.add(f"K_{tag}_eff", rf"K_{{\phi,{tag}}}^{{eff}}", f"{name}: effective (secant) roll stiffness at \u03c6",
+                 rf"\frac{{\Delta F_{{z,e}}^{{{tag}}}\,t_{tag}}}{{\phi}}\cdot\frac{{\pi}}{{180}}",
+                 rf"\frac{{{fmt(de)}\cdot{fmt(su.t)}}}{{{paren(phi)}}}\cdot\frac{{\pi}}{{180}}", de * su.t / phi * DEG,
+                 "N·m/deg", S)
+    return de, {"spring": sp, "bump": bp, "arb": ab}
