@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sakkawma VD</title>
+  <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/vendor/katex/katex.min.js"></script>
+  <script src="/static/vendor/plotly/plotly.min.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">◧</span> Sakkawma VD <span class="sub">Lateral load transfer · v1</span></div>
+  <div class="actions">
+    <span id="status" class="status"></span>
+    <button id="btn-load" class="ghost" title="Load a parameter set (JSON)">Load</button>
+    <button id="btn-save" class="ghost" title="Save the current parameter set (JSON)">Save</button>
+    <button id="btn-reset" class="ghost" title="Restore placeholder defaults">Defaults</button>
+    <button id="btn-report" class="primary" title="Full calculation report (HTML, printable)">Export report</button>
+    <input type="file" id="file-in" accept=".json,application/json" hidden>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" id="form"></aside>
+
+  <main class="main">
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="results">Results</button>
+      <button class="tab" data-tab="view">Front view</button>
+      <button class="tab" data-tab="sweeps">Sweeps &amp; compare</button>
+      <button class="tab" data-tab="kin">Kinematic curves</button>
+      <button class="tab" data-tab="tire">Tire</button>
+    </nav>
+
+    <!-- RESULTS -->
+    <section class="panel active" id="tab-results">
+      <div id="warnings"></div>
+      <div class="kpis" id="kpis"></div>
+      <div id="kpi-deriv"></div>
+      <div class="grid2">
+        <div class="card"><h3>Front axle</h3><div id="axle-f"></div></div>
+        <div class="card"><h3>Rear axle</h3><div id="axle-r"></div></div>
+      </div>
+      <div class="grid2">
+        <div class="card"><h3>Load transfer split (per wheel)</h3><div id="lt-bar" class="plot-sm"></div></div>
+        <div class="card"><h3>Kinematics (from hardpoints)</h3><div id="kin-table"></div>
+          <button id="btn-copy-rc" class="small">Copy kinematic RC heights → load-transfer inputs</button></div>
+      </div>
+      <div class="card">
+        <h3>All derivations <span class="muted">(evaluation order – every number above traces back here)</span></h3>
+        <div id="all-deriv"></div>
+      </div>
+      <div class="card"><h3>Model assumptions</h3><ol id="assumptions" class="small-text"></ol></div>
+    </section>
+
+    <!-- FRONT VIEW -->
+    <section class="panel" id="tab-view">
+      <div class="toolbar">
+        <label>Axle <select id="v-axle"><option value="front">Front</option><option value="rear">Rear</option></select></label>
+        <div class="seg" id="v-mode">
+          <button data-mode="roll" class="on">Roll</button>
+          <button data-mode="heave">Heave</button>
+          <button data-mode="bump">1-wheel bump</button>
+        </div>
+        <label class="grow"><span id="v-label">Roll φ</span>
+          <input type="range" id="v-slider" min="-4" max="4" step="0.1" value="0">
+          <output id="v-out">0</output></label>
+        <button id="v-play" class="small">▶ Animate</button>
+        <button id="v-fromay" class="small" title="Set the roll angle computed at the current a_y">φ from a_y</button>
+      </div>
+      <div class="toolbar sub">
+        <label><input type="checkbox" id="v-constr" checked> Construction lines (IC/RC)</label>
+        <label><input type="checkbox" id="v-dims" checked> Dimensions</label>
+        <label><input type="checkbox" id="v-loads" checked> Wheel loads (at a_y)</label>
+        <label><input type="checkbox" id="v-ghost" checked> Static ghost</label>
+      </div>
+      <div class="viewwrap"><svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
+      <div class="readouts" id="v-read"></div>
+      <p class="muted small-text">Front view, looking from the front of the car, cornering so that the <b>outer</b>
+        wheel is on the right. Roll + = outer side down. The roll centre is where the lines contact
+        patch → instant centre from both sides cross. This view is for illustration only: the load-transfer
+        numbers use the RC-height inputs in the sidebar.</p>
+    </section>
+
+    <!-- SWEEPS -->
+    <section class="panel" id="tab-sweeps">
+      <div class="card">
+        <div class="form-row">
+          <label>X parameter <select id="s-x"></select></label>
+          <label>from <input type="number" id="s-x0" step="any"></label>
+          <label>to <input type="number" id="s-x1" step="any"></label>
+          <label>points <input type="number" id="s-xn" value="25" min="2" max="200"></label>
+        </div>
+        <div class="form-row">
+          <label>Compare parameter <select id="s-c"><option value="">— none —</option></select></label>
+          <label class="grow">values (comma separated) <input type="text" id="s-cv" placeholder="e.g. 20, 40, 60"></label>
+          <label><input type="checkbox" id="s-lim"> compute limit a_y per point (slower)</label>
+          <button id="s-run" class="primary">Run sweep</button>
+        </div>
+        <details class="outsel"><summary>Outputs to plot</summary><div id="s-outs"></div></details>
+      </div>
+      <div id="s-plots" class="plots"></div>
+    </section>
+
+    <!-- KINEMATIC CURVES -->
+    <section class="panel" id="tab-kin">
+      <div class="card">
+        <div class="form-row">
+          <label>Axle <select id="k-axle"><option value="front">Front</option><option value="rear">Rear</option></select></label>
+          <label>Mode <select id="k-mode">
+            <option value="heave">Heave (wheel travel, mm)</option>
+            <option value="roll">Roll (deg)</option>
+            <option value="bump">1-wheel bump (mm)</option></select></label>
+          <label>from <input type="number" id="k-x0" value="-30" step="any"></label>
+          <label>to <input type="number" id="k-x1" value="30" step="any"></label>
+          <label>points <input type="number" id="k-xn" value="31" min="2" max="200"></label>
+        </div>
+        <div class="form-row">
+          <label>Compare parameter <select id="k-c"><option value="">— none —</option></select></label>
+          <label class="grow">values <input type="text" id="k-cv" placeholder="e.g. 270, 282.2, 300"></label>
+          <button id="k-run" class="primary">Run</button>
+        </div>
+      </div>
+      <div id="k-plots" class="plots"></div>
+    </section>
+
+    <!-- TIRE -->
+    <section class="panel" id="tab-tire">
+      <div class="grid2">
+        <div class="card"><h3>F<sub>y</sub>(α) at several wheel loads</h3><div id="t-fa" class="plot"></div></div>
+        <div class="card"><h3>F<sub>y</sub>(F<sub>z</sub>) at fixed slip angles – degressive load sensitivity</h3><div id="t-fz" class="plot"></div></div>
+      </div>
+      <p class="muted small-text">Markers show the four wheels' operating points at the current a_y.
+        Because the F<sub>y</sub>(F<sub>z</sub>) curve bends over, the outer tire gains less than the inner tire loses:
+        this is why load transfer on an axle reduces that axle's grip.</p>
+    </section>
+  </main>
+</div>
+
+<script type="module" src="/static/js/main.js"></script>
+</body>
+</html>
